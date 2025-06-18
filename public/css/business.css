@@ -1,0 +1,21 @@
+.box-border{
+  border: 1px solid #ccc;
+        padding: 10px; 
+}
+.b-list{
+  position: absolute;
+  background: white;
+  margin-top: -5px;
+  border: 1px solid #ccc;
+  padding: 20px;
+  margin-left: 26px;
+}
+
+.b-list {
+  display: none;
+}
+
+.link-business{
+  text-decoration: none;
+}
+

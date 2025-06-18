@@ -1,0 +1,92 @@
+.gradient-custom {
+  /* fallback for old browsers */
+  background: #ffffff;
+  
+  /* Chrome 10-25, Safari 5.1-6 */
+  background: -webkit-linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 236, 210, 1));
+  
+  /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+  background: linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 236, 210, 1))
+  }
+  
+  .carousel-indicators li {
+  background-color: #282828;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  }
+
+  .text-center{
+    text-align: center;
+  }
+  /* abc */
+  #weather-widget {
+    font-family: Arial, sans-serif;
+  }
+  
+  #weather-link {
+    color: #000;
+    text-decoration: none;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px 20px;
+    display: inline-block;
+  }
+  
+  #weather-link:hover {
+    background-color: #f0f0f0;
+  }
+  #generate-code-button {
+    margin-left: 4px;
+  }
+  .hading-forcast {
+    background: #3fbbc0;
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  button {
+    background-color: #3fbbc0;
+    /* Add any additional styles you need */
+    color: #ffffff; /* Set text color to white for better contrast */
+    /* Add more styles as needed */
+  }
+  .d-none {
+    display: none;
+  }
+  .text-underline{
+    text-decoration: underline;
+  }
+
+  .white{
+    color:white;
+  }
+  .black{
+    color:black;
+  }
+
+  .blue{
+    background: rgb(31, 86, 124);
+
+  }
+  .dark-grey{
+    background: rgb(89, 99, 103);
+
+  }
+  .yellow{
+    background:rgb(255, 202,58);
+
+  }
+
+  .basic-white{
+    background: -webkit-linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 236, 210, 1));  
+    background: linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 236, 210, 1))
+  }
+
+  .light-grey{
+    background: rgb(179, 168, 152);
+  }
+
+  .off-white{
+    background:rgb(241, 238, 229);
+  }
+  

@@ -1,0 +1,453 @@
+/* custom css */
+.tr-room-section .tr-hotel-price-lists li img {
+  max-height: 52px;
+}
+.tr-top-ways-list .tr-img img{
+  height: -webkit-fill-available;
+}
+.tr-travel-img img {
+  max-height: 79px; 
+}
+/*.modal-backdrop {
+  position: relative !important;
+}*/
+.gal-imgages{
+  width: 300px !important;
+}
+@media (min-width: 1024px) {
+  #gallerySlider img {
+    height: 764px !important;
+  }
+}
+#review-not-foundimg{
+  max-width: 470px;
+  text-align: center;     
+  margin-right: 240px;
+}
+/*#hotel_loc_list{
+  width: 378px !important;
+}*/
+
+.arrow-link {
+  margin-right: 10px; /* Adjust spacing between arrows as needed */
+}
+.arrow-link img {
+  vertical-align: middle;
+}
+/* Optional: Adjust spacing specifically between double and single arrows if needed */
+.arrow-link:first-child {
+  margin-right: 20px; /* Adjust spacing from the start */
+}
+.hotel-name {
+  color: black;
+}
+.h-sign-up {
+  color: white;
+
+}
+/*.tr-search-hotel .tr-recent-searchs-modal {
+  top: 10px !important;
+  width: 335px;
+  margin-left: -27px;
+}
+.tr-recent-searchs-modal {
+  top: 10px !important;
+  width: 335px;
+
+}
+.autoCompletewrapper li {
+  list-style-type: none;
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #DDD;
+  text-transform: capitalize;
+  color: #4A4A4A;
+  font-size: 14px;
+  font-weight: 400;
+}*/
+.tr-heading-with-rating .hotel-name a{
+  color: black;
+}
+.more-options-modals {
+  background-color: #FFFFFF;
+  box-shadow: 0px 4px 33.4px rgba(156, 156, 156, 0.12), 0px 4px 33.4px rgba(156, 156, 156, 0.12);
+  border-radius: 12px;
+  width: 256px;
+  padding: 12px 10px;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 3;
+}
+/*#citylist{
+  border: 1px solid #DDD;
+  background: white;
+}
+.autoCompletewrapper li a{
+	color:black;
+}*/
+.tr-room-section-2 .tr-hotel-deatil .tr-hotel-facilities ul li {
+  margin-top: -22px  !important;
+  line-height: 0px !important;
+}
+/*.tr-city-wise-hotel-lists {
+  font-size: 16px;
+  width: 1114px !important;
+  max-width: none !important;
+}*/
+.tr-filter-list.sel-filters{
+  margin-top: 7px;
+  width: auto;
+  display: inline-block;
+}
+.top-attractions.sta{
+  width: auto !important;
+}
+
+/* sight detail edit */
+.tr-file-upload {
+  background-color: rgba(214, 214, 214, 0.5);
+  border-radius: 8px;
+  padding: 12px 20px;
+}
+.tr-file-upload .tr-image-upload-wrap {
+  font-size: 16px;
+  line-height: 28px;
+  color: #000000;
+  position: relative;
+  text-align: center;
+}
+.tr-file-upload .tr-file-upload-input {
+  position: absolute;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  opacity: 0;
+  cursor: pointer;
+}
+.tr-file-upload .tr-file-upload-content {
+  display: none;
+  text-align: center;
+  max-height: 200px;
+  max-width: 200px;
+  margin: auto;
+  padding: 20px;
+  position: relative;
+}
+
+.tr-hotel-informations .tr-hotel-info .tr-raiting {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+}
+.tr-hotel-informations .tr-hotel-info .tr-review-with-perc {
+  display: flex;
+}
+.tr-hotel-informations .tr-hotel-info .tr-review-with-perc .tr-heart.tr-excellent {
+  background-color: #28965A;
+}
+.tr-hotel-informations .tr-hotel-info .tr-ranting-percent {
+  font-size: 16px;
+  font-weight: 700;
+  color: #171717;
+  margin-right: 8px;
+}
+.tr-hotel-informations .tr-hotel-info .tr-review-name {
+  font-size: 16px;
+  font-weight: 700;
+  margin-right: 24px;
+}
+/*
+.tr-top-ways-section .tr-top-ways-lists .tr-top-ways-list {
+  padding: 10px 20px 10px 8px;
+  background: #FFFFFF;
+  border: 1px solid #D6D6D6;
+  border-radius: 8px;
+  width: 50%;
+  max-width: 477px;
+  margin-right: 24px;
+  margin-bottom: 24px;
+  display: flex;
+}*/
+.tr-top-ways-section .tr-top-ways-lists .tr-top-ways-list {
+  position: relative;
+}
+/* sight detail  */
+
+
+/*sight listing */
+
+/* Hotel Search Form Section Styling */
+/*.tr-hotel-on-map {
+  z-index: 999 ;
+}
+.tr-hotel-on-map {
+  top: 68px !important;
+}
+.tr-explore-listing .tr-explore-right-section {
+  padding-top:0px;
+}
+.explore-listing-map{
+  border-radius: 12px;
+}
+.tr-recent-searchs-modal{
+  margin-top: 40px;
+}*/
+.card-img{
+   border-radius: 8px;
+}
+/*header .tr-utility-nav .nav-item {
+  border-right: 1px solid #D6D6D6;
+  border-left: none !important;
+}
+.tr-heading-with-rating h2 a:hover {
+  text-decoration: underline;
+}
+.tr-listing-without-dates-1 .tr-room-section-2 .tr-hotel-deatil .tr-more-facilities ul li { 
+  list-style: unset !important;
+  position: static !important;
+}*/
+.tr-room-section-2 .tr-hotel-deatil .tr-more-facilities ul {
+  display: block !important;
+  flex-wrap: unset !important;
+}
+.responsive-container img {	
+	object-fit: cover;
+	object-position: center;
+}
+.tr-map-tooltip .tr-image img {
+    display: block; /* Treat image as a block element */
+    margin: 0 auto; /* Center the image horizontally */
+    max-width: calc(100% - 10px); /* Ensure the image is slightly smaller than the popup width */
+    box-sizing: border-box; /* Include padding and border in the width calculation */
+}
+.tr-room-section-2 .tr-hotel-deatil .tr-hotel-facilities ul li img{
+  width: 35px;
+}
+.tr-listing-without-dates-1 .tr-room-section-2 .tr-hotel-deatil .tr-hotel-facilities ul li {
+  line-height: 28px !important;
+}
+.tr-facilities-details .tr-facilities-box-lists img{
+  height: 26px;
+  width: 25px;
+}
+@media (max-width: 768px) {
+    .tr-map-tooltip .tr-image img {
+        position: relative; /* Allows offset adjustments */
+        left: 10px; /* Shift the image 10px to the right */
+    }
+}
+/* explore detail page
+@media screen and (max-width: 768px) {
+	.tr-top-ways-section .tr-top-ways-lists .tr-top-ways-list{
+		    width: fit-content;
+	}	
+}*/
+
+
+#restaurant-data .tr-tourist-place-lists .tr-tourist-place .img{
+	border-radius:5px;
+}
+/*end explore detail page*/
+
+
+.tr-room-section-2.filter-listing .tr-hotel-location{
+  margin-bottom: 12px;
+}
+
+ @media screen and (max-width: 768px) {
+  .filter-by-heading{
+    display: none !important;
+  }
+ #gallerySliderModal .modal-content{
+    padding: 0;
+  }
+#gallerySliderModal #gallerySlider img {
+    height: 346px !important;
+      
+  }
+	 
+} 
+button.tr-anchor-btn.budget-more{
+  color: transparent !important;
+}
+
+.login-required-message {
+    text-align: center;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.login-required-message p {
+    margin: 0;
+    font-size: 16px;
+    color: #666;
+}
+
+.login-required-message .login-link {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.login-required-message .login-link:hover {
+    text-decoration: underline;
+}
+
+.leaflet-popup-tip-container {
+  display: none; /* Keep the popup hidden by default */
+}	
+.tr-explore-search-modal {
+  display: none; /* Keep the modal hidden by default */
+}
+
+.tr-explore-search-modal.active {
+  display: block; /* Show when search box is open */
+}
+
+.tr-explore-search-feild {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.tr-map-section {
+  position: relative; /* Ensure the button positions relative to this container */
+}
+
+.tr-map-section .btn-close {
+  display: none; /* Default: hidden */
+}
+
+@media (max-width: 768px) {
+  .tr-map-section.mobile-active .btn-close {
+      display: flex;
+      position: absolute;
+      top: 10px; /* Adjust vertical spacing */
+      right: 10px; /* Align to the right corner */
+      z-index: 9999; /* Ensure it appears above other elements */
+      background: #ffffff; /* White background for better visibility */
+      border: 1px solid #ccc;
+      border-radius: 50%; /* Circular button */
+      width: 32px; /* Width of the button */
+      height: 32px; /* Height of the button */
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+  }
+
+  .tr-map-section .btn-close::before {
+      content: '×'; /* Close icon */
+      font-size: 18px; /* Adjust icon size */
+      color: #000; /* Black icon color */
+      font-weight: bold;
+  }
+}
+  #map {
+      height: 100%; /* Set a fixed height */
+      width: 100%;
+    }
+
+    .tr-filter-label {
+    margin-top: -30px; /* Adjust this value to control how much you move it up */
+}
+    .tr-filter-label + .unique-h5 {
+    margin-top: 25px;
+}
+
+@media (max-width: 768px) { /* Apply styles only for mobile screens */
+    .tr-breadcrumb-section {
+        display: flex;
+        flex-wrap: nowrap;  /* Prevent wrapping */
+        overflow-x: auto;  /* Enable horizontal scrolling if necessary */
+        white-space: nowrap;  /* Prevent text from breaking into multiple lines */
+        align-items: center;
+        scrollbar-width: none;  /* Hide scrollbar for a cleaner look */
+    }
+
+    .tr-breadcrumb {
+        display: flex;
+        flex-wrap: nowrap;  /* Ensure everything stays in one row */
+        overflow-x: auto;  /* Allow scrolling if necessary */
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        white-space: nowrap;  /* Prevent wrapping */
+    }
+}
+
+.tr-more-facilities .short-description-content {
+    text-align: justify; /* Justifies the text alignment */
+    max-height: 92px;
+    overflow: hidden;
+    position: relative;
+    line-height: 1.5; 
+}
+
+.tr-more-facilities .short-description-content.show-more {
+    max-height: none; /* Shows full content when toggled */
+}
+
+.tr-anchor-btn.toggle-list {
+    display: block; /* Ensures the button is visible */
+    margin-top: 10px;
+}
+/* Transition for smoother expansion */
+.tr-more-facilities.expanded .paragraph-content {
+    max-height: none; /* Remove height restriction when expanded */
+}
+
+/* "Read More" button styling */
+/* Force visibility for troubleshooting */
+.custom-read-more {
+    font-weight: 600;
+  font-size: 16px;
+  line-height: 19px;
+  letter-spacing: 0.01em;
+  color: #FF4B01;
+  border: none;
+  border-bottom: 1px solid #FF4B01;
+  background: transparent;
+}
+
+/* Hide "Read More" button when content is fully expanded */
+.tr-more-facilities.expanded .custom-read-more {
+    display: none;
+}
+	  .tr-breadcrumb-section {
+    display: block !important;
+}
+
+/* Custom styling for search results */
+.tr-location-info a.custom-link {
+  color: #000000 !important;
+  text-decoration: none;
+}
+
+.tr-location-info .tr-hotel-name {
+  font-weight: 600;
+  font-size: 16px;
+  color: #000000;
+  margin-bottom: 4px;
+}
+
+.tr-location-info .tr-hotel-city {
+  font-size: 14px;
+  color: #000000;
+  display: block;
+}
+
+/* Fix for hotel images in map modal */
+#mapModal .tr-hotel-deatils .tr-hotal-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

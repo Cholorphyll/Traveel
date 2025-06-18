@@ -1,0 +1,130 @@
+/* custom css */
+.menu-btn{
+  background: #F0F3F5;  border-radius: 4px;
+  border: 0;
+  height: 44px;
+  padding: 10px;
+}
+.nr-rest {
+  text-decoration: none;
+}
+.text-deco{
+  text-decoration: none;
+}
+
+.nearby-restaurant{
+  width: fit-content;
+}
+.bg-e {
+  background-color: #f7f8f8;
+}
+
+.leaflet-popup-close-button {
+  display: none !important;
+}
+.leaflet-shadow-pane{
+  display:none;
+}
+
+/* welcome page */
+
+.text-capitalize .text-dark.text-decoration-none.mx-2{
+  display: inline;
+}
+.bg-e {
+  background-color: #f7f8f8;
+}
+
+.bloglistingcarousel .image-wrap  img{
+ 
+  max-width: fit-content;
+}
+/* @media only screen and (max-width: 600px) { 
+  #map1.listmap{
+  height:1000px;
+	  width:500px;
+	  
+  }
+}
+
+*/
+
+.orangebutton a{
+  text-decoration: none;
+  color: white;
+}
+.p-api a{
+
+}
+
+
+/*#hotel_loc_list{
+  position: relative;
+}*/
+.hotel-title{
+	text-decoration: none;
+}
+.fltr-listing-page img{
+  width: -webkit-fill-available;
+}
+.hotel-link a{
+  text-decoration: none;
+}
+.h-logo a img{
+    height: 17px;
+}
+#moreContent {
+  display: none;
+}
+.recent-his{
+    width: 100%;
+    left: 0;
+    top: 48px;
+}
+
+input#searchlocation::placeholder {
+	  padding-left: 0 !important;
+}
+
+.navbar-brand{
+width:100px;
+}
+
+.filter-drop-down .row.mnts .form-check-input {
+    margin-right: 0px !important;
+}
+
+.star {
+  cursor: pointer;
+  font-size: 24px;
+  color: gray;
+  transition: color 0.2s;
+}
+
+.star:hover,
+.star.selected {
+  color: #fc4a39;
+}
+.t-datepicker>div{
+position:static;
+}
+
+.q-ch {
+  border-radius: 20px;
+    border: 1px solid rgba(221, 221, 221, 0.87);
+    display: flex;
+    height: 36px;
+    padding: 8px 16px;
+    justify-content: center;
+    align-items: center;
+    color: rgba(74, 74, 74, 0.83);
+    font-size: 14px;
+    font-weight: 400;    
+    white-space: nowrap;
+    cursor: pointer;
+    width: fit-content;
+}
+.delete-icon {
+  cursor: pointer;
+  margin-right: 12px;
+}

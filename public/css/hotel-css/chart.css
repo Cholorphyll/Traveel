@@ -1,0 +1,153 @@
+/*------------------------------------
+  Range Slider
+------------------------------------*/
+.u-range-slider {
+  height: 1px;
+}
+
+.u-range-slider .irs {
+  height: 1px;
+}
+
+.u-range-slider .irs-line {
+  top: 0;
+  height: 1px;
+}
+
+.u-range-slider .irs-line-left {
+  left: 0;
+  height: 1px;
+  background-color: #e7eaf3;
+  border-top-left-radius: 6.1875rem;
+  border-bottom-left-radius: 6.1875rem;
+}
+
+.u-range-slider .irs-line-mid {
+  height: 1px;
+  background-color: #e7eaf3;
+}
+
+.u-range-slider .irs-line-right {
+  right: 0;
+  height: 1px;
+  background-color: #e7eaf3;
+  border-top-right-radius: 6.1875rem;
+  border-bottom-right-radius: 6.1875rem;
+}
+
+.u-range-slider .irs-bar {
+  top: 0;
+  height: 1px;
+  background-color: #B0B0B0;
+}
+
+.u-range-slider .irs-bar-edge {
+  top: 0;
+  left: .0625rem;
+  height: 1px;
+  width: .6875rem;
+  border-top-left-radius: 6.1875rem;
+  border-bottom-left-radius: 6.1875rem;
+  background-color: #B0B0B0;
+}
+
+.u-range-slider .irs-slider {
+  top: -10px;
+  width: 1.5rem;
+  height: 1.5rem;
+  background-color: #DEDEDE;
+  cursor: pointer;
+  border-radius: 50%;
+  box-shadow: 0 0.1875rem 0.75rem rgba(140, 152, 164, 0.3125);
+}
+
+.u-range-slider .irs-slider.state_hover {
+  -webkit-transform: scale(1.3);
+  transform: scale(1.3);
+}
+
+.u-range-slider .irs-from,
+.u-range-slider .irs-to,
+.u-range-slider .irs-single {
+  display: inline-block;
+  min-width: 2.5rem;
+  background-color: #fff;
+  color: #1e2022;
+  font-size: 0.875rem;
+  text-shadow: none;
+  text-align: center;
+  border-radius: 1px;
+  box-shadow: 0 0 35px rgba(140, 152, 164, 0.125);
+  padding: .5rem;
+}
+
+/* Indicator */
+.u-range-slider-indicator {
+  height: 5rem;
+}
+
+.u-range-slider-indicator .irs {
+  height: 5rem;
+}
+
+.u-range-slider-indicator.u-range-slider-grid {
+  height: 8rem;
+}
+
+.u-range-slider-indicator.u-range-slider-grid .irs {
+  height: 8rem;
+}
+
+.u-range-slider-indicator .irs-line {
+  top: 3.875rem;
+}
+
+.u-range-slider-indicator .irs-bar {
+  top: 3.875rem;
+}
+
+.u-range-slider-indicator .irs-bar-edge {
+  top: 3.875rem;
+}
+
+.u-range-slider-indicator .irs-slider {
+  top: 3.1875rem;
+}
+
+/* Grid */
+.u-range-slider-grid {
+  height: 4.5rem;
+}
+
+.u-range-slider-grid .irs {
+  height: 4.5rem;
+}
+
+.u-range-slider-grid .irs-grid {
+  height: 2.5rem;
+}
+
+.u-range-slider-grid .irs-grid-text {
+  display: inline-block;
+  min-width: 2.5rem;
+  line-height: 1;
+  font-size: 0.875rem;
+  color: #77838f;
+  border-radius: 6.1875rem;
+  padding: 1px;
+}
+
+.u-range-slider-grid .irs-grid-text.current {
+  background: rgba(55, 125, 255, 0.1);
+  color: #B0B0B0;
+}
+
+.u-range-slider-grid .irs-grid-pol {
+  height: .75rem;
+  background-color: #e7eaf3;
+}
+
+.u-range-slider-grid .irs-grid-pol.small {
+  display: none;
+}
+

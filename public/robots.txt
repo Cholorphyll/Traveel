@@ -1,0 +1,9 @@
+User-agent: *
+
+Disallow: /getwithoutdatedata
+Disallow: /searchr?q=
+Disallow: /blog
+Disallow: /cek
+
+
+Sitemap: https://www.travell.co/sitemap-en-us.xml

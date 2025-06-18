@@ -1,0 +1,553 @@
+.t-check-in,
+.t-check-out,
+.t-datepicker {
+    display: inline-block;
+    position: relative;
+    float: left;
+}
+
+.t-datepicker {
+    clear: both;
+    width: 100%;
+    font-size: 14px;
+    line-height: 1.4em;
+    max-width: 276px
+}
+
+.t-datepicker {
+    position: relative;
+}
+
+
+.t-datepicker>div {
+    border: none;
+}
+
+@media only screen and (max-width: 992px) {
+    .t-datepicker>div {
+        border-radius: 8px;
+        background: #F7F7F7;
+        margin-right: 8px;
+    }
+
+    .t-datepicker>div:last-child {
+
+        margin-right: 0;
+    }
+
+}
+
+@media only screen and (min-width: 992px) {
+
+    .typeahed .t-datepicker.t-datepicker-open {
+        border-radius: 50px !important;
+        border: 1px solid #DDD !important;
+        background: #FFF !important;
+        box-shadow: 0px 4px 12px 0px rgba(0, 0, 0, 0.05), 0px 1px 2px 0px rgba(0, 0, 0, 0.08) !important;
+    }
+}
+
+.t-check-in,
+.t-check-out {
+    border-width: 1px;
+    border-style: solid;
+    width: 50%;
+    box-sizing: border-box
+}
+
+.t-check-in .t-date-info-title,
+.t-check-out .t-date-info-title {
+    position: absolute;
+    top: 12px;
+    left: 33px;
+    display: block;
+    font-weight: 400;
+    opacity: .5;
+    font-size: 13px;
+    cursor: pointer
+}
+
+.t-check-in .fa,
+.t-check-out .fa {
+    top: -1px;
+    position: relative
+}
+
+.t-check-in {
+    border-right-width: 1px;
+    border-radius: 4px 0 0 4px
+}
+
+.t-picker-only {
+    border-radius: 4px;
+    width: 100%
+}
+
+.t-check-out {
+    border-left-width: 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.t-check-out .t-datepicker-day {
+    left: -100%
+}
+
+.t-arrow-top {
+    top: 32px;
+    z-index: 9999
+}
+
+.t-arrow-top,
+.t-arrow-top::after {
+    border-width: 10px;
+    border-style: solid;
+    border-color: transparent transparent #ddd;
+    display: inline-block;
+    position: absolute
+}
+
+.t-arrow-top::after {
+    top: -9px;
+    left: -10px;
+    content: '';
+    border-width: 10px;
+    border-bottom-color: #fff
+}
+
+
+.t-datepicker-day {
+    border-width: 1px;
+    border-style: solid;
+    top: 90px;
+    overflow: hidden;
+    position: absolute;
+    z-index: 9998;
+    padding: 10px 0;
+    border-radius: 4px;
+    box-shadow: 0 7px 15px rgba(0, 0, 0, .25)
+}
+
+.t-table-wrap {
+    width: 100%;
+    padding: 0 10px;
+    font-size: inherit;
+    display: inline-block;
+    vertical-align: top
+}
+
+.t-datepicker-days {
+    width: max-content;
+}
+
+.t-datepicker-days .t-table-wrap {
+    padding: 0;
+    width: 47%;
+    margin-left: 2%
+}
+
+@media (max-width:480px) {
+    .t-datepicker-days {
+        width: 300px
+    }
+
+    .t-datepicker-days .t-table-wrap {
+        margin-left: 0;
+        width: 100%;
+        padding: 0 10px
+    }
+}
+
+@media (max-width:320px) {
+    .t-datepicker-days {
+        width: 290px
+    }
+
+    .t-datepicker-days .t-table-wrap {
+        padding: 0 5px
+    }
+}
+
+.t-table-condensed {
+    width: 100%;
+    border-spacing: 0;
+    border-collapse: collapse;
+    vertical-align: top
+}
+
+.t-next,
+.t-prev,
+.t-table-condensed td,
+.t-table-condensed th {
+    text-align: center;
+    padding: 10px
+}
+
+.t-date-title {
+    clear: both;
+    width: 100%;
+    text-align: center;
+    display: inline-block;
+    margin: 0;
+    padding: 15px 0 10px
+}
+
+.t-day,
+.t-disabled,
+.t-end,
+.t-range,
+.t-start {
+
+
+    width: 40.658px;
+    height: 40.658px;
+    color: #222;
+
+}
+
+@media only screen and (min-width: 992px) {
+
+    .t-day,
+    .t-disabled,
+    .t-end,
+    .t-range,
+    .t-start {
+        width: 56.658px;
+        height: 56.658px;
+    }
+}
+
+.t-range {
+    font-weight: 600;
+}
+
+.t-arrow {
+    border: none;
+}
+
+.t-hover-day::after,
+.t-special-day:before {
+    content: '';
+    border-style: solid;
+}
+
+.t-arrow,
+.t-dates,
+.t-day,
+.t-end,
+.t-end-limit,
+.t-range,
+.t-start {
+    cursor: pointer
+}
+
+.t-special-day {
+    position: relative
+}
+
+.t-special-day:before {
+    height: 3px;
+    width: 3px;
+    top: 0;
+    right: 0;
+    position: absolute;
+    display: block;
+    border-width: 3px;
+    -webkit-box-sizing: content-box;
+    -moz-box-sizing: content-box;
+    box-sizing: content-box
+}
+
+.t-hover-day {
+    position: relative
+}
+
+.t-hover-day-content {
+    top: -30px;
+    width: 70px;
+    right: calc(50% - 35px);
+    position: absolute;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 5px;
+    border-radius: 4px;
+    z-index: 9999
+}
+
+.t-hover-day::after {
+    position: absolute;
+    top: -8px;
+    right: calc(50% - 7px);
+    border-width: 7px
+}
+
+.t-today .t-hover-day-content {
+    z-index: 9998
+}
+
+.t-check-in .t-end-limit,
+.t-disabled {
+    opacity: .25;
+    cursor: auto
+}
+
+
+.t-start~.t-range {
+    background: linear-gradient(270deg, #EDF1F3 0%, #ffffff66 100%) !important;
+}
+
+
+
+
+.t-range~.t-range {
+    background: #eff2f4 !important;
+}
+
+
+.t-range:has(+ .t-end) {
+    background: linear-gradient(90deg, #EDF1F3 0%, #ffffff66 100%) !important;
+}
+
+.t-month {
+    font-weight: 700;
+}
+
+thead>tr:nth-child(2) {
+    font-size: 9px;
+    color: #B0B0B0;
+}
+
+.t-hover-day-content {
+    display: none;
+}
+
+
+
+.t-dates span {
+    color: #717171;
+    margin-right: 4px;
+}
+
+.t-dates label {
+    color: #717171;
+}
+
+
+
+.t-table-condensed td,
+.t-table-condensed th {
+    width: 40.658px;
+    height: 40.658px;
+}
+
+@media only screen and (min-width: 992px) {
+
+    .t-table-condensed td,
+    .t-table-condensed th {
+        width: 56.658px;
+        height: 56.658px;
+    }
+}
+
+
+.t-check-in,
+.t-check-out {
+    border-color: #ededed;
+}
+
+.t-check-in {
+    border-right-color: #e8e8e8;
+}
+
+.t-date-title {
+    color: #e91e63;
+}
+
+.t-special-day:before {
+    border-color: #e91e63 #e91e63 transparent transparent;
+}
+
+.t-datepicker-day {
+    border-color: #ededed;
+    background: #fff;
+}
+
+.t-day,
+.t-disabled,
+.t-end,
+.t-range,
+.t-start {
+    background: #fff;
+    border-color: #fff;
+}
+
+.t-disabled {
+    background: 0 0
+}
+
+.t-highlighted {
+    color: #000000;
+}
+
+.t-highlighted.t-disabled {
+    background: #fafafa;
+}
+
+
+
+.t-range,
+.t-range-limit {
+    color: #000000;
+}
+
+.t-range {
+    background: #EDF1F3;
+}
+
+.t-range-limit {
+    background: #EDF1F3;
+}
+
+.t-range-limit.t-end,
+.t-range-limit.t-start {
+    color: #222222;
+    background: #EDF1F3;
+}
+
+
+.t-hover-day,
+.t-hover-day-content,
+.t-hover-day:hover {
+    color: #fff;
+    background: #000000;
+}
+
+.t-hover-day::after {
+    border-color: #000000 transparent transparent;
+}
+
+.t-today,
+.t-today .t-hover-day-content {
+    background: #aeaeae;
+}
+
+.t-today {
+    color: #222222;
+
+}
+
+.t-today::after {
+    border-top-color: #aeaeae;
+}
+
+.t-today:hover,
+.t-today:hover .t-hover-day-content {
+    background: #000000;
+}
+
+.t-today:hover::after {
+    border-top-color: #000000;
+}
+
+.t-end.t-today,
+.t-start.t-today {
+    color: #222222;
+
+}
+
+
+
+.t-datepicker-days {
+    width: max-content;
+}
+
+
+
+
+
+.t-start,
+.t-end,
+.t-hover-day {
+    width: 40.658px;
+    height: 40.658px;
+    background-color: #dddddd;
+    color: #222222;
+    border-radius: 50%;
+    position: relative;
+}
+
+@media only screen and (min-width: 992px) {
+
+    .t-start,
+    .t-end,
+    .t-hover-day {
+        width: 56.658px;
+        height: 56.658px;
+    }
+
+}
+
+.t-start::after,
+.t-end::after,
+.t-hover-day::after {
+    content: '';
+    width: 40.658px;
+    height: 40.658px;
+    position: absolute;
+    background-color: transparent;
+    border: thin solid #B0B0B0;
+    border-radius: 50px;
+    left: 0;
+    top: 0;
+}
+@media only screen and (min-width: 992px) {
+    .t-start::after,
+    .t-end::after,
+    .t-hover-day::after {
+        width: 56.658px;
+        height: 56.658px;
+    } 
+}
+
+
+td.t-day.t-range-limit.t-hover-day {
+    position: relative;
+}
+
+.t-hover-day,
+.t-hover-day-content,
+.t-hover-day:hover {
+    color: #717171;
+    background: transparent;
+}
+
+.t-dates {
+    color: transparent;
+    padding: 10px 15px;
+    box-sizing: border-box;
+    position: relative;
+    height: 100%;
+    padding-top: 40px;
+
+}
+
+.t-date-check-in::after {
+    content: 'Check-in';
+    position: absolute;
+    left: 29px;
+    color: #717171;
+    top: 17px;
+}
+
+.t-date-check-out::after {
+    content: 'Check-out';
+    position: absolute;
+    left: 29px;
+    color: #717171;
+    top: 17px;
+}
+
+.t-check-in .t-date-info-title,
+.t-check-out .t-date-info-title {
+    top: 40px;
+    left: 30px;
+}
