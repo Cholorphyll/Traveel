@@ -493,6 +493,19 @@ class ExploreController extends Controller
 
         // Process sight categories for each result
         if (!empty($searchresults)) {
+            $sightIds = array_column($searchresults, 'SightId');
+            $sightCats = DB::table('SightCategory')
+                ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
+                ->select('SightCategory.SightId', 'Category.Title')
+                ->whereIn('SightCategory.SightId', $sightIds)
+                ->get()
+                ->groupBy('SightId');
+
+            $timings = DB::table('SightTiming')
+                ->whereIn('SightId', $sightIds)
+                ->get()
+                ->keyBy('SightId');
+
             foreach ($searchresults as $results) {
                 if (isset($results->SightId) && (
                     strpos($results->SightId, 'rest_') === 0 ||
@@ -502,18 +515,8 @@ class ExploreController extends Controller
                     $results->timing = [];
                 } else if (isset($results->SightId)) {
                     // For attractions, get categories and timing
-                    $sightId = $results->SightId;
-
-                    $Sightcat = DB::table('SightCategory')
-                        ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
-                        ->select('Category.Title')
-                        ->where('SightCategory.SightId', '=', $sightId)
-                        ->get();
-
-                    $results->Sightcat = $Sightcat;
-
-                    $timing = DB::select("SELECT * FROM SightTiming WHERE SightId = ?", [$sightId]);
-                    $results->timing = $timing;
+                    $results->Sightcat = $sightCats->get($results->SightId, collect());
+                    $results->timing = $timings->get($results->SightId);
                 }
             }
         }

@@ -349,6 +349,24 @@ class DataController extends Controller
         ]);
 }
 
+    public function hotel_galary_image(Request $request)
+    {
+        $hotid = $request->get('hotelid');
+        $url = 'https://yasen.hotellook.com/photos/hotel_photos?id=' . $hotid;
+        $response = Http::withoutVerifying()->get($url);
+        $images = $response->json();
+        return view('hotel_detail_data.hotel_galary_image')->with('images', $images)->with('hotelid', $hotid);
+    }
+
+    public function hoteldetail_view_all_images(Request $request)
+    {
+        $hotid = $request->get('hotelid');
+        $url = 'https://yasen.hotellook.com/photos/hotel_photos?id=' . $hotid;
+        $response = Http::withoutVerifying()->get($url);
+        $images = $response->json();
+        return view('hotel_detail_data.hoteldetail_view_all_images')->with('images', $images)->with('hotelid', $hotid);
+    }
+
 
     public function recenthistory(Request $request){
         $sight = 0;
@@ -574,361 +592,132 @@ if (!empty($att->Averagerating) && $att->Averagerating != 0) {
         ]);
     }
 
-  public function filtersightbycat(request $request){
-
+public function filtersightbycat(Request $request)
+{
     $locId = $request->input('locationId');
     $catid = $request->input('catid');
     $names = $request->input('names');
     $delcatid = $request->input('delcatid');
-
     $clearfilter = $request->input('clearfilter');
-    if($clearfilter == 1){
-        foreach (request()->session()->all() as $key => $value) {
-            if (str_starts_with($key, 'cat_') || str_starts_with($key, 'catid_')) {
-                request()->session()->forget($key);
-            }
+
+    // Clear session filters if requested
+    if ($clearfilter == 1) {
+        session()->forget(['cat_', 'catid_', 'locId', 'mustSee', 'isrestaurant']);
+    }
+
+    // Handle session for location and filters
+    if (session('locId') != $locId) {
+        session()->forget(['catid_', 'mustSee', 'isrestaurant']);
+    }
+    session(['locId' => $locId]);
+
+    if ($delcatid != "") {
+        session()->forget('catid_' . $delcatid);
+        session()->forget('cat_' . $delcatid);
+        if ($delcatid == "mustsee") {
+            session()->forget('mustSee');
+        }
+        if ($delcatid == "isrestaurant") {
+            session()->forget('isrestaurant');
         }
     }
 
-    $lid = $request->session()->get('locId');
-    if($lid != $locId){
-        foreach ($request->session()->all() as $key => $value) {
-            if (str_starts_with($key, 'catid_')) {
-                $request->session()->forget($key);
-            }
-        }
-
-      $request->session()->forget('locId');
-      $request->session()->forget('mustSee');
-      $request->session()->forget('isrestaurant');
+    if ($catid) {
+        session(['catid_' . $catid => $catid]);
+        session(['cat_' . $catid => $names . '_' . $catid]);
     }
-    if( $delcatid != ""){
-        foreach ($request->session()->all() as $key => $value) {
-            if (str_starts_with($key, 'catid_') && $value == $delcatid) {
-                $request->session()->forget($key);
-            }
-        }
-        foreach ($request->session()->all() as $key => $value) {
-            if (str_starts_with($key, 'cat_')) {
-                $catId = explode('_', $value)[1];
-
-                if ($catId == $delcatid) {
-                    $request->session()->forget($key);
-                }
-            }
-        }
-
-    }
-    if($delcatid = "mustsee"){
-      $request->session()->forget('mustSee');
-    }
-    if($delcatid = "isrestaurant"){
-      $request->session()->forget('isrestaurant');
-    }
-
-    $request->session()->put('locId', $locId);
-
-    if (!$request->session()->has('catid_' . $catid)) {
-        $sessionVariableName = 'catid_' . $catid;
-        $request->session()->put($sessionVariableName, $catid);
-
-    }
-
-
-    if (!$request->session()->has('cat_' . $catid)) {
-
-        $catNameAndId = $names . '_' . $catid;
-
-        $sessionVariableName = 'cat_' . $catid;
-        $request->session()->put($sessionVariableName, $catNameAndId);
-    }
-
 
     $categoryIds = [];
-       $mustSee = 0;
-    $isRestaurant = 0;
-
-
-
-
- foreach ($request->session()->all() as $key => $value) {
+    $mustSee = 0;
+    foreach (session()->all() as $key => $value) {
         if (str_starts_with($key, 'catid_')) {
-             if ($value != 'mustsee' && $value != 'isrestaurant' && $value != null) {
-
-                    $categoryIds[] = $value;
-
-             }
-            if ($value === 'mustsee') {
+            if ($value == 'mustsee') {
                 $mustSee = 1;
-                $request->session()->put('mustSee', 1);
-            } elseif ($value === 'isrestaurant') {
-                $isRestaurant = 1;
-                $request->session()->put('isrestaurant', 1);
+                session(['mustSee' => 1]);
+            } elseif ($value != 'isrestaurant' && $value != null) {
+                $categoryIds[] = $value;
             }
         }
     }
 
-    $getSight = [];
-    $getSight2 = [];
-    $getSight3 = [];
+    $cacheKey = 'sights_filtered_' . $locId . '_' . md5(implode(',', $categoryIds) . '_' . $mustSee);
+    $result = Cache::remember($cacheKey, 3600, function () use ($locId, $categoryIds, $mustSee) {
+        $query = DB::table('Sight')
+            ->join('Location', 'Location.LocationId', '=', 'Sight.LocationId')
+            ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
+            ->leftJoin('Sight_image as img', function ($join) {
+                $join->on('Sight.SightId', '=', 'img.Sightid')
+                    ->whereRaw('img.Image = (SELECT Image FROM Sight_image WHERE Sightid = Sight.SightId LIMIT 1)');
+            })
+            ->where('Sight.LocationId', $locId)
+            ->select('Sight.SightId', 'Sight.IsMustSee', 'Sight.Title', 'Sight.TAAggregateRating', 'Sight.LocationId', 'Sight.Slug', 'IsRestaurant', 'Address', 'Sight.Latitude', 'Sight.Longitude', 'Sight.CategoryId', 'Category.Title as CategoryTitle', 'Location.Name as LName', 'Location.slugid', 'img.Image', 'Sight.TATotalReviews', 'Sight.ticket', 'Sight.MicroSummary')
+            ->orderBy('Sight.IsMustSee', 'asc');
 
-
-  $allResults = [];
-$result=[];
-// Fetch data based on 'mustSee' flag
-//return $categoryIds
-//return $request->session()->all();
-// Fetch data based on category IDs
-if (!empty($categoryIds) || isset($categoryIds[0])  && $categoryIds[0] == null) {
-
-$getSightCategory = DB::table('Sight')
-     ->join('Location','Location.LocationId','=','Sight.LocationId')
-    ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
-
-    ->leftJoin('Sight_image as img', function ($join) {
-        $join->on('Sight.SightId', '=', 'img.Sightid');
-        $join->whereRaw('img.Image = (SELECT Image FROM Sight_image WHERE Sightid =Sight.SightId LIMIT 1)');
-       })
-
-    ->where('Sight.LocationId', $locId)
-    ->whereIn('Sight.CategoryId', $categoryIds)
-    ->select('Sight.SightId', 'Sight.IsMustSee', 'Sight.Title', 'Sight.TAAggregateRating', 'Sight.LocationId', 'Sight.Slug', 'IsRestaurant', 'Address', 'Sight.Latitude', 'Sight.Longitude', 'Sight.CategoryId', 'Category.Title as CategoryTitle', 'Location.Name as LName', 'Location.slugid',  'img.Image', 'Sight.TATotalReviews','Sight.ticket','Sight.MicroSummary')
-  //  ->select('Category.Title as CategoryTitle', 'Sight.*','Location.slugid', 'img.Image','Location.Name as LName')
-  //   ->orderByRaw("FIELD(Sight.CategoryId, " . implode(',', $categoryIds) . ")")
-	  ->orderBy('Sight.IsMustSee', 'asc')
-    ->get()
-    ->toArray();
-
-
-
-$result = array_merge($result, $getSightCategory);
-$result = array_reverse($result);
-
-}
-
-if ($mustSee == 1) {
-$getSightMustSee = DB::table('Sight')
-    ->join('Location','Location.LocationId','=','Sight.LocationId')
-    ->leftJoin('Sight_image as img', function ($join) {
-        $join->on('Sight.SightId', '=', 'img.Sightid');
-        $join->whereRaw('img.Image = (SELECT Image FROM Sight_image WHERE Sightid = Sight.SightId LIMIT 1)');
-       })
-    ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
-    ->where('Sight.LocationId', $locId)
-    ->where('Sight.IsMustSee', 1)
-    ->select('Sight.SightId', 'Sight.IsMustSee', 'Sight.Title', 'Sight.TAAggregateRating', 'Sight.LocationId', 'Sight.Slug', 'IsRestaurant', 'Address', 'Sight.Latitude', 'Sight.Longitude', 'Sight.CategoryId', 'Category.Title as CategoryTitle', 'Location.Name as LName', 'Location.slugid',  'img.Image', 'Sight.TATotalReviews','Sight.ticket','Sight.MicroSummary')
-	->orderBy('Sight.IsMustSee', 'asc')
-    //->select('Category.Title as CategoryTitle', 'Sight.*','Location.slugid', 'img.Image','Location.Name as LName')
-    ->get()
-    ->toArray();
-
-$result = array_merge($result, $getSightMustSee);
-if( $catid == 'mustsee'){
-     $result = array_reverse($result);
-}
-
-}
-
-
-
-
-$result = array_unique($result, SORT_REGULAR);
-//	return $request->session()->all() ;
-
-
-if (!$request->session()->has('mustSee') && !$request->session()->has('isrestaurant') && (empty($categoryIds) || $categoryIds[0] == null)) {
-    $result =[];
-    $result = DB::table('Sight')
-    ->join('Location','Location.LocationId','=','Sight.LocationId')
-    ->leftJoin('Sight_image as img', function ($join) {
-        $join->on('Sight.SightId', '=', 'img.Sightid');
-        $join->whereRaw('img.Image = (SELECT Image FROM Sight_image WHERE Sightid = Sight.SightId LIMIT 1)');
-       })
-    ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
-    ->where('Sight.LocationId', $locId)
-   // ->select('Category.Title  as CategoryTitle', 'Sight.*','Location.slugid', 'img.Image','Location.Name as LName')
-     ->select('Sight.SightId', 'Sight.IsMustSee', 'Sight.Title', 'Sight.TAAggregateRating', 'Sight.LocationId', 'Sight.Slug', 'IsRestaurant', 'Address', 'Sight.Latitude', 'Sight.Longitude', 'Sight.CategoryId', 'Category.Title as CategoryTitle', 'Location.Name as LName', 'Location.slugid',  'img.Image', 'Sight.TATotalReviews','Sight.ticket','Sight.MicroSummary')
-		->orderBy('Sight.IsMustSee', 'asc')
-    //->orderBy('Sight.TATotalReviews','desc')
-    ->limit(10)
-    ->get()->toArray();
-
-}
-// return $result;
-$sightImages = collect();
-$sightIds = []; // Initialize the array to hold SightId values
-
-if (!empty($result)) {
-    // Check if $result is an array of stdClass objects
-    if (is_array($result)) {
-        // Use foreach to collect SightId from each stdClass object
-        foreach ($result as $sights) {
-            // Ensure $sights is an object and then access the SightId
-            if (is_object($sights) && isset($sights->SightId)) {
-                $sightIds[] = $sights->SightId; // Collect SightId from object
-            }
+        if (!empty($categoryIds)) {
+            $query->whereIn('Sight.CategoryId', $categoryIds);
         }
+        if ($mustSee == 1) {
+            $query->where('Sight.IsMustSee', 1);
+        }
+
+        if (empty($categoryIds) && $mustSee == 0) {
+            $query->limit(10);
+        }
+
+        return $query->get()->toArray();
+    });
+
+    $result = array_unique($result, SORT_REGULAR);
+
+    // Eager load relationships
+    $sightIds = array_column($result, 'SightId');
+    $sightImages = DB::table('Sight_image')->whereIn('Sightid', $sightIds)->get()->keyBy('Sightid');
+    $sightCats = DB::table('SightCategory')->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')->select('SightCategory.SightId', 'Category.Title')->whereIn('SightCategory.SightId', $sightIds)->get()->groupBy('SightId');
+    $timings = DB::table('SightTiming')->whereIn('SightId', $sightIds)->get()->keyBy('SightId');
+    $reviews = DB::table('SightReviews')->whereIn('SightId', $sightIds)->get()->groupBy('SightId');
+
+    foreach ($result as &$res) {
+        $res->Sightcat = $sightCats->get($res->SightId, collect());
+        $res->timing = $timings->get($res->SightId);
+        $res->reviews = $reviews->get($res->SightId, collect());
+        $res->image = $sightImages->get($res->SightId);
     }
 
-    // After collecting SightId, check if $sightIds is not empty
-    if (!empty($sightIds)) {
-        // Fetch sight images if $sightIds is not empty
-        $sightImages = DB::table('Sight_image')
-            ->whereIn('Sightid', $sightIds)
-            ->get();
-    }
-} else {
-    $result = []; // If no results, set result to empty array
-}
-
-
-
-
-// Final result as an array
-$result = array_values($result);
-//	$result = $result->toArray();
-    //new code
-if (!empty($result)) {
-
-foreach ($result as $results) {
-    $sightId = $results->SightId;
-
-    $Sightcat = DB::table('SightCategory')
-        ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
-        ->select('Category.Title')
-        ->where('SightCategory.SightId', '=', $sightId)
-        ->get();
-
-    $results->Sightcat = $Sightcat;
-
-    $timing = DB::select("SELECT * FROM SightTiming WHERE SightId = ?", [$sightId]);
-    $results->timing = $timing;
-
-    // Retrieve reviews for the sight using a raw SQL query
-    $reviews = DB::select("SELECT * FROM SightReviews WHERE SightId = ?", [$sightId]);
-
-    // Merge the reviews into the result directly
-    $results->reviews = $reviews;
-}
-}
-
-
-//end set timing cat val
-$mergedData = [];
-
-// Loop through attractions and associate them with categories
-if (!empty($result)) {
-foreach ($result as $att) {
-    if (!empty($att->Sightcat)) {
-        // Loop through categories and create an associative array
-        foreach ($att->Sightcat as $category) {
-            if ($category->Title != "") {
-                $categoryTitle = $category->Title;
-            } else {
-                $categoryTitle = '';
-            };
-
-            if (!empty($att->Latitude) && !empty($att->Longitude)) {
-                // Check if $att->timing is set and contains the required properties
-                if (isset($att->timing->timings)) {
-                    // Calculate the opening and closing time
-                    $schedule = json_decode($att->timing->timings, true);
-                    $currentDay = strtolower(date('D'));
-                    $currentTime = date('H:i');
-                    $openingtime = $schedule['time'][$currentDay]['start'];
-                    $closingTime = $schedule['time'][$currentDay]['end'];
-                    $isOpen = false;
-                    $formatetime = '';
-
-                    if ($openingtime === '00:00' && $closingTime === '23:59') {
-                        $formatetime = '12:00';
-                        $closingTime = '11:59';
-                    }
-
-                    if ($currentTime >= $openingtime && $currentTime <= $closingTime) {
-                        $isOpen = true;
-                    }
-
-                    $timingInfo = $isOpen ? $formatetime . ' Open Now' : 'Closed Today';
-                } else {
-                    $timingInfo = '';
-                }
-                 if($att->TAAggregateRating != ""  && $att->TAAggregateRating != 0){
-                    $recomd = rtrim($att->TAAggregateRating, '.0') * 20;
-                    $recomd = $recomd . '%';
-               }else{
-                   $recomd ='--';
-               }
-
-               $imagepath ="";
-               if($att->Image !=""){
-                      $imagepath = asset('public/sight-images/'. $att->Image) ;
-               }else{
-                      $imagepath = asset('public/images/Hotel lobby.svg');
-               }
-                $locationData = [
-                    'Latitude' => $att->Latitude,
-                    'Longitude' => $att->Longitude,
-                    'SightId' => $att->SightId,
-                    'ismustsee' => $att->IsMustSee,
-                    'name' => $att->Title,
-                    'recmd' => $recomd,
-                    'cat' => $categoryTitle,
-                    'tm' => $timingInfo, // Include the timing in the locationData array
-                    'cityName'=>'City of '.$att->LName,
-                    'imagePath'=>$imagepath,
-                ];
-
-                $mergedData[] = $locationData; // Add the locationData directly to mergedData
+    $mergedData = [];
+    foreach ($result as $att) {
+        $timingInfo = '';
+        if (isset($att->timing->timings)) {
+            $schedule = json_decode($att->timing->timings, true);
+            $currentDay = strtolower(date('D'));
+            if (isset($schedule['time'][$currentDay])) {
+                $openingtime = $schedule['time'][$currentDay]['start'];
+                $closingTime = $schedule['time'][$currentDay]['end'];
+                $isOpen = (date('H:i') >= $openingtime && date('H:i') <= $closingTime);
+                $timingInfo = $isOpen ? 'Open Now' : 'Closed Today';
             }
         }
-    } else {
-        // If there are no categories, create a default "uncategorized" category
-        if (!empty($att->Latitude) && !empty($att->Longitude)) {
-            // Check if $att->timing is set and contains the required properties
-            if (isset($att->timing->timings)) {
 
-               if($att->TAAggregateRating != ""  && $att->TAAggregateRating != 0){
-                    $recomd = rtrim($att->TAAggregateRating, '.0') * 20;
-                   $recomd = $recomd . '%';
-               }else{
-                   $recomd ='--';
-               }
-               $imagepath ="";
-               if($att->Image !=""){
-                      $imagepath = asset('public/sight-images/'. $att->Image) ;
-               }else{
-                      $imagepath = asset('public/images/Hotel lobby.svg');
-               }
-                $locationData = [
-                    'Latitude' => $att->Latitude,
-                    'Longitude' => $att->Longitude,
-                    'SightId' => $att->SightId,
-                    'ismustsee' => $att->IsMustSee,
-                    'name' => $att->Title,
-                    'recmd' => $recomd,
-                    'cat' => ' ',
-                    'tm' => $timingInfo,
-                    'cityName'=>'City of '.$att->LName,
-                    'imagePath'=>$imagepath,
-                ];
+        $recomd = ($att->TAAggregateRating != "" && $att->TAAggregateRating != 0) ? (rtrim($att->TAAggregateRating, '.0') * 20) . '%' : '--';
+        $imagepath = $att->Image ? asset('public/sight-images/' . $att->Image) : asset('public/images/Hotel lobby.svg');
 
-                $mergedData[] = $locationData;
-            }
-        }
+        $mergedData[] = [
+            'Latitude' => $att->Latitude,
+            'Longitude' => $att->Longitude,
+            'SightId' => $att->SightId,
+            'ismustsee' => $att->IsMustSee,
+            'name' => $att->Title,
+            'recmd' => $recomd,
+            'cat' => $att->Sightcat->pluck('Title')->implode(', '),
+            'tm' => $timingInfo,
+            'cityName' => 'City of ' . $att->LName,
+            'imagePath' => $imagepath,
+        ];
     }
-}
-}
 
-	    $result = array_reverse($result);
-//return print_r($result);
-// Encode data as JSON
-$locationDataJson = json_encode($mergedData);
+    $locationDataJson = json_encode($mergedData);
+    $html = view('getloclistbycatid', ['searchresults' => $result, 'sightImages' => $sightImages, 'type' => 'filter'])->render();
 
-    $html = view('getloclistbycatid')->with('searchresults', $result)->with('sightImages',$sightImages)->with('type','filter')->render();
-
-return response()->json(['mapData' => $locationDataJson, 'html' => $html]);
-
+    return response()->json(['mapData' => $locationDataJson, 'html' => $html]);
 }
 
     public function updateSight(Request $request)
@@ -1788,389 +1577,18 @@ private function getWithinRadius($distance): int
     }
 
 
-  public function hotel_list($segment, Request $request)
-    {
+public function hotel_list($segment, Request $request)
+{
+    $parts = explode('-', $segment);
+    $id = array_shift($parts);
 
-   	  $segment_parts = explode('-', $segment);
-        if (!empty($segment_parts[0]) && is_numeric($segment_parts[0]) && strlen($segment_parts[0]) < 5) {
-            $segment_parts[0] = str_pad($segment_parts[0], 5, '0', STR_PAD_LEFT);
-            $segment = implode('-', $segment_parts);
-            return redirect()->route('hotel.list', [$segment]);
-       	 }
-
-         // Initialize variables
-        $id = null;
-        $slug = null;
-        $desiredId = null;
-        $lslugid = "";
-        $lslug = "";
-        $st = "";
-        $amenity = "";
-        $price = "";
-        $reviewscore = "";
-        $filtertype = null;
-        $amenity_slugs = null;
-        $neighborhood_slugs = null;
-        $propertytype_slugs = null;
-        $redirect_needed = false;
-        $sight_slugs = null;
-
-          // Split segment by '-' to separate all parts
-        $parts = explode('-', $segment);
-
-        if (!empty($parts)) {
-            // Get the ID (first part)
-            $id = array_shift($parts);
-
-            // Process remaining parts
-            $city_parts = [];
-            $filter_parts = [];
-            $special_filters = [];
-            $processed_amenities = [];
-            $processed_neighborhoods = [];
-            $processed_propertyTypes = [];
-            $processed_sights = [];
-            $current_part_type = null;
-
-            foreach ($parts as $part) {
-
-                // Skip if this part is already processed as a name
-                if (isset($processed_amenities[$part]) || isset($processed_neighborhoods[$part]) || isset($processed_sights[$part]) || isset($processed_propertyTypes[$part])) {
-                    continue;
-                }
-
-                // Check for special filters first
-                if (preg_match('/^st\d+$/', $part)) {
-                    $st = trim(str_replace('st', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-                elseif (preg_match('/^rs\d+$/', $part)) {
-                    $reviewscore = trim(str_replace('rs', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-            elseif (in_array($part, ['free_cancellation', 'parking', 'Internet', 'breakfast'])) {
-        // Debug logging
-
-        $amenity = $part;
-        $filtertype = $part;
-        $special_filters[] = $part;
-
-        // Map text-based amenities to their IDs
-        switch ($part) {
-            case 'free_cancellation':
-                $amenity_ids[] = 1; // Replace with actual ID from your database
-                break;
-            case 'parking':
-                $amenity_ids[] = 2; // Replace with actual ID from your database
-                break;
-            case 'Internet':
-                $amenity_ids[] = 3; // Replace with actual ID from your database
-                break;
-            case 'breakfast':
-                $amenity_ids[] = 4; // Replace with actual ID from your database
-                break;
-        }
-    }
-                elseif (preg_match('/^price\d+$/', $part)) {
-                    $price = trim(str_replace('price', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-                // Check for property type with number (e.g., pt12)
-    elseif (preg_match('/^pt(\d+)$/', $part, $matches)) {
-        $propertyType_id = $matches[1];
-
-        // Skip if we've already processed this property type
-        if (isset($processed_propertyTypes[$part])) {
-            continue;
-        }
-
-        $propertyType_info = DB::table('TPHotel_types')
-            ->select('type')
-            ->where('hid', $propertyType_id)
-            ->first();
-
-        if ($propertyType_info && $propertyType_info->type) {
-            // Generate slug from the type field - use same pattern as amenities and neighborhoods
-            $propertyType_slug = preg_replace('/[^a-z0-9-]+/', '-', strtolower($propertyType_info->type));
-            $propertyType_slug = trim($propertyType_slug, '-');
-
-            // Check if this property type is already in the URL
-            $property_part = $part . '-' . $propertyType_slug;
-            if (!strpos($segment, $property_part)) {
-                $filter_parts[] = $property_part;
-                $redirect_needed = true;
-            } else {
-                $filter_parts[] = $property_part;
-            }
-
-            // Mark this property type as processed to avoid duplicates
-            $processed_propertyTypes[$part] = true;
-
-            // Store just the part (pt4) without the slug for later use
-            if ($propertytype_slugs === null) {
-                $propertytype_slugs = $part;
-            } else {
-                $propertytype_slugs .= '-' . $part;
-            }
-        } else {
-            $filter_parts[] = $part;
-        }
-        $current_part_type = 'propertyType';
-    }
-                // Check for amenity with number (e.g., a33)
-                elseif (preg_match('/^a[a-z]+(\d+)$/', $part, $matches)) {
-                    $amenity_id = $matches[1];
-
-                    // Skip if we've already processed this amenity
-                    if (isset($processed_amenities[$part])) {
-                        continue;
-                    }
-
-                    $amenity_info = DB::table('TPHotel_amenities')
-                        ->select('name', 'slug')
-                        ->where('id', $amenity_id)
-                        ->first();
-
-                    if ($amenity_info && $amenity_info->name) {
-                        $amenity_name = str_replace(' ', '-', strtolower($amenity_info->name));
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $amenity_name)) {
-                            $filter_parts[] = $part . '-' . $amenity_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $amenity_name;
-                        }
-                        $processed_amenities[$part] = true;
-
-                        if ($amenity_slugs === null) {
-                            $amenity_slugs = $part;
-                        } else {
-                            $amenity_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'amenity';
-                }
-                // Check for neighborhood with number (e.g., n5)
-                elseif (preg_match('/^n[a-z]+(\d+)$/', $part, $matches)) {
-                    $neighborhood_id = $matches[1]; // Extracts only the numeric part
-
-
-                    // Skip if we've already processed this neighborhood
-                    if (isset($processed_neighborhoods[$part])) {
-                        continue;
-                    }
-
-    $neighborhood_info = DB::table('Neighborhood')
-        ->select('NeighborhoodId', 'Name', 'slug', 'LocationID') // Make sure to select LocationId
-        ->where('NeighborhoodId', $neighborhood_id)
-        ->first();
-
-    if (!$neighborhood_info) {
-        // If the neighborhood is not found, show a 404 error
-        abort(404);
+    if (is_numeric($id) && strlen($id) < 5) {
+        $id = str_pad($id, 5, '0', STR_PAD_LEFT);
+        $new_segment = $id . '-' . implode('-', $parts);
+        return redirect()->route('hotel.list', [$new_segment], 301);
     }
 
-    // Fetch the LocationId from the Location table using the slugid
-    $location_info = DB::table('Location')
-        ->select('LocationId')
-        ->where('slugid', $id) // Assuming $id is the slugid
-        ->first();
-
-    if ($location_info && $neighborhood_info->LocationID == $location_info->LocationId) {
-        // Proceed to show the neighborhood page
-    } else {
-        // Handle the case where the neighborhood does not belong to the location
-        abort(404); // Show a 404 error if the neighborhood does not belong to the location
-    }
-                    if ($neighborhood_info && $neighborhood_info->Name) {
-                       $neighborhood_name = preg_replace('/[\/\(\)]/', '-', strtolower($neighborhood_info->Name));
-
-                        $neighborhood_name = str_replace(' ', '-', strtolower($neighborhood_name));
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $neighborhood_name)) {
-                            $filter_parts[] = $part . '-' . $neighborhood_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $neighborhood_name;
-                        }
-                        $processed_neighborhoods[$part] = true;
-
-                        if ($neighborhood_slugs === null) {
-                            $neighborhood_slugs = $part;
-                        } else {
-                            $neighborhood_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'neighborhood';
-                }
-
-
-                elseif (preg_match('/^sqx(\d+)$/', $part, $matches)) {
-                    $sight_id = $matches[1]; // Extracts only the numeric part
-
-                    // Skip if we've already processed this sight
-                    if (isset($processed_sights[$part])) {
-                        continue;
-                    }
-
-                    $sight = DB::table('Sight')
-                    ->select('Title', 'SightId','Location_id', 'LocationId','Latitude','Longitude')
-                    ->where('SightId', $sight_id)
-                    ->first();
-
-
-                if (!$sight) {
-                    // If the sight is not found, show a 404 error
-                    abort(404);
-                }
-
-                // Now check if this sight belongs to the correct location
-                if ($sight->Location_id != $id) {
-                    // If the sight doesn't belong to this location, show 404
-                    abort(404);
-                }
-
-                    if ($sight && $sight->Title) {
-                        $sight_name = preg_replace('/[^a-z0-9-]+/', '-', strtolower($sight->Title));
-                        $sight_name = str_replace(' ', '-', strtolower($sight_name));
-
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $sight_name)) {
-                            $filter_parts[] = $part . '-' . $sight_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $sight_name;
-                        }
-                        $processed_sights[$part] = true;
-
-                        if ($sight_slugs === null) {
-                            $sight_slugs = $part;
-                        } else {
-                            $sight_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'sight';
-                }
-
-                // If it's a text part following an amenity, neighborhood, property type, or sight ID, skip it
-                elseif (preg_match('/^[a-zA-Z\-]+$/', $part) &&
-                       ($current_part_type == 'amenity' || $current_part_type == 'neighborhood' || $current_part_type == 'sight' || $current_part_type == 'propertyType')) {
-                    continue;
-                }
-                // If none of the above, it's part of the city name
-                else {
-                    $city_parts[] = $part;
-                    $current_part_type = 'city';
-                }
-            }
-
-            // Combine city parts to form the slug
-            if (!empty($city_parts)) {
-                $slug = implode('-', $city_parts);
-            }
-
-            // If we need to redirect to include names
-            if ($redirect_needed) {
-                // Build the new URL maintaining the correct order
-                $new_url_parts = ['ho'];
-
-                // Add ID first
-                if ($id) {
-                    $new_url_parts[] = $id;
-                }
-
-                // Add city parts
-                if (!empty($city_parts)) {
-                    $new_url_parts[] = implode('-', $city_parts);
-                }
-
-                // Add special filters
-                if (!empty($special_filters)) {
-                    $new_url_parts = array_merge($new_url_parts, $special_filters);
-                }
-
-                // Add amenities and neighborhoods with their names
-                if (!empty($filter_parts)) {
-                    $new_url_parts = array_merge($new_url_parts, array_unique($filter_parts));
-                }
-
-                $new_url = implode('-', $new_url_parts);
-
-                // Only redirect if the URL is actually different
-                if ($new_url !== 'ho-' . $segment) {
-
-                    return redirect($new_url);
-                }
-            }
-        }
-
-        // Check if location exists in Temp_Mapping by slugid
-        $locationExists = DB::table('Temp_Mapping')->where('slugid', $id)->first();
-
-        if ($locationExists) {
-            // Fix: Set the slug variable to match what's in the database
-            // This ensures we're using the correct slug throughout the function
-            if (empty($slug) || $slug != $locationExists->slug) {
-                $slug = $locationExists->slug;
-            }
-    // Get the correct slug from the database
-    $correctSlug = $locationExists->slug;
-
-    // Construct what the URL should be with just the location part
-    $baseCorrectUrl = 'ho-' . $id . '-' . $correctSlug;
-
-    // If the URL doesn't match exactly, redirect to the correct one but preserve filters
-    $currentUrl = 'ho-' . $segment;
-    if (strpos($currentUrl, $baseCorrectUrl) === false) {
-        // We need to redirect, but preserve any filters
-
-        // Extract all parts after the location ID
-        $allParts = explode('-', $segment);
-        array_shift($allParts); // Remove the ID part
-
-        // Extract the location slug parts and filter parts
-        $filterParts = [];
-        $locationSlugParts = [];
-
-        // Process all parts to separate location slug from filters
-        foreach ($allParts as $part) {
-            // Check if this part is a filter
-            if (preg_match('/^(st\d+|rs\d+|price\d+|pt\d+|a[a-z]*\d+|n[a-z]*\d+|sqx\d+)/', $part) ||
-                in_array($part, ['free_cancellation', 'parking', 'Internet', 'breakfast']) ||
-                (isset($processed_amenities[$part]) || isset($processed_neighborhoods[$part]) || isset($processed_sights[$part]) || isset($processed_propertyTypes[$part]))) {
-                $filterParts[] = $part;
-            }
-            // If it's a descriptive part following a filter ID, add it to filters
-            elseif (preg_match('/^[a-zA-Z\-]+$/', $part) &&
-                   ($current_part_type == 'amenity' || $current_part_type == 'neighborhood' || $current_part_type == 'sight' || $current_part_type == 'propertyType')) {
-                $filterParts[] = $part;
-            }
-            // Otherwise it's part of the location slug
-            else {
-                $locationSlugParts[] = $part;
-            }
-        }
-
-        // Build the new URL with correct location slug and preserved filters
-        $correctUrl = $baseCorrectUrl;
-
-        // Add filters if they exist
-        if (!empty($filterParts)) {
-            $correctUrl .= '-' . implode('-', $filterParts);
-        }
-
-        return redirect($correctUrl);
-    }
-}
+    $slug = implode('-', $parts);
 
        // Parse amenity IDs
     $amenity_ids = [];
@@ -4228,206 +3646,118 @@ private function getSightHotelInfo($sight_info) {
 
     }
 
-  public function getSignature(request $request) {
-    $cityId = $request->get('lid');
+public function getSignature(Request $request)
+{
     $hotelId = $request->get('hid');
-    $cityName = $request->get('cityName');
-
-    $guests = $request->get('guest');
-    $rooms = $request->get('rooms');
-    if ($guests == 0) {
-        $guests = Session()->get('guest');
-    }
-    if ($rooms == 0) {
-        $rooms = Session()->get('rooms');
-    }
-
-    $stchin = $request->get('checkin');
+    $chkin = $request->get('checkin');
     $checkout = $request->get('checkout');
+    $guests = $request->get('guest', 1);
 
-    $cmbdate = $request->get('checkin') . '_' . $request->get('checkout');
-
-    $checkin = Session()->get('checkin');
-
-    if ($cmbdate === $checkin || empty($checkout) && !empty($checkin)) {
-        $expdate = explode('_', $checkin);
-
-        $checkin_date = trim($expdate[0]);
-        $checkout_date = trim($expdate[1]);
-
-        $date_stchin = strtotime($checkin_date);
-        $chkin = date("Y-m-d", $date_stchin);
-
-        $date_chout = strtotime($checkout_date);
-        $checout = date("Y-m-d", $date_chout);
-
-    } else {
-        if (!empty($stchin) && !empty($checkout)) {
-
-            $date_stchin = strtotime($stchin);
-            $chkin = date("Y-m-d", $date_stchin);
-
-            $date_chout = strtotime($checkout);
-            $checout = date("Y-m-d", $date_chout);
-
-            $cmbdate = $chkin . '_' . $checout;
-
-            session()->put('checkin', $cmbdate);
-
-        } else {
-            $checkinTimestamp = strtotime("+1 day");
-            $chkin = date("Y-m-d", $checkinTimestamp);
-
-            // Get the checkout date by adding 4 days
-            $checkoutTimestamp = strtotime("+5 days", $checkinTimestamp);
-            $checout = date("Y-m-d", $checkoutTimestamp);
+    $cacheKey = "signature_{$hotelId}_{$chkin}_{$checkout}_{$guests}";
+    return Cache::remember($cacheKey, 3600, function () use ($hotelId, $chkin, $checkout, $guests) {
+        if (empty($chkin) || empty($checkout)) {
+            $chkin = date("Y-m-d", strtotime("+1 day"));
+            $checkout = date("Y-m-d", strtotime("+5 days"));
         }
-    }
-    if (empty($chkin) && empty($checout)) {
-        return 0;
-    }
 
-    // New code start
-    $checkinDate = $chkin;
-    $checkoutDate = $checout;
-    $adultsCount = 2; // $guests;
-    $customerIP = '49.156.89.145';
-    $childrenCount = '1';
-    $chid_age = '10';
-    $lang = 'en';
-    $currency = 'USD';
-    $waitForResult = '0';
-    $iata = $hotelId;
+        $adultsCount = $guests;
+        $customerIP = '49.156.89.145';
+        $childrenCount = '1';
+        $chid_age = '10';
+        $lang = 'en';
+        $currency = 'USD';
+        $waitForResult = '0';
+        $iata = $hotelId;
 
-    $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869";
-    $TRAVEL_PAYOUT_MARKER = "299178";
+        $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869";
+        $TRAVEL_PAYOUT_MARKER = "299178";
 
-    $SignatureString = "" . $TRAVEL_PAYOUT_TOKEN . ":" . $TRAVEL_PAYOUT_MARKER . ":" . $adultsCount . ":" .
-        $checkinDate . ":" .
-        $checkoutDate . ":" .
-        $chid_age . ":" .
-        $childrenCount . ":" .
-        $currency . ":" .
-        $customerIP . ":" .
-        $iata . ":" .
-        $lang . ":" .
-        $waitForResult;
+        $signatureString = "{$TRAVEL_PAYOUT_TOKEN}:{$TRAVEL_PAYOUT_MARKER}:{$adultsCount}:{$chkin}:{$checkout}:{$chid_age}:{$childrenCount}:{$currency}:{$customerIP}:{$iata}:{$lang}:{$waitForResult}";
+        $signature = md5($signatureString);
 
-    $signature = md5($SignatureString);
+        $url = "http://engine.hotellook.com/api/v2/search/start.json?hotelId={$iata}&checkIn={$chkin}&checkOut={$checkout}&adultsCount={$adultsCount}&customerIP={$customerIP}&childrenCount={$childrenCount}&childAge1={$chid_age}&lang={$lang}&currency={$currency}&waitForResult={$waitForResult}&marker={$TRAVEL_PAYOUT_MARKER}&signature={$signature}";
 
-    $url = 'http://engine.hotellook.com/api/v2/search/start.json?hotelId=' . $iata . '&checkIn=' . $checkinDate . '&checkOut=' . $checkoutDate . '&adultsCount=' . $adultsCount . '&customerIP=' . $customerIP . '&childrenCount=' . $childrenCount . '&childAge1=' . $chid_age . '&lang=' . $lang . '&currency=' . $currency . '&waitForResult=' . $waitForResult . '&marker=299178&signature=' . $signature;
+        try {
+            $response = Http::withoutVerifying()->get($url);
+            $data = $response->json();
 
-    $response = Http::withoutVerifying()->get($url);
+            if ($response->successful() && !empty($data['searchId'])) {
+                $searchId = $data['searchId'];
+                $limit = 10;
+                $offset = 0;
+                $roomsCount = 10;
+                $sortAsc = 1;
+                $sortBy = 'price';
 
-    if ($response->successful()) {
-        $data = json_decode($response);
-        if (!empty($data)) {
-            $searchId = $data->searchId;
+                $signatureString2 = "{$TRAVEL_PAYOUT_TOKEN}:{$TRAVEL_PAYOUT_MARKER}:{$limit}:{$offset}:{$roomsCount}:{$searchId}:{$sortAsc}:{$sortBy}";
+                $sig2 = md5($signatureString2);
 
-            $limit = 10;
-            $offset = 0;
-            $roomsCount = 10;
-            $sortAsc = 1;
-            $sortBy = 'price';
+                $url2 = "http://engine.hotellook.com/api/v2/search/getResult.json?searchId={$searchId}&limit={$limit}&sortBy={$sortBy}&sortAsc={$sortAsc}&roomsCount={$roomsCount}&offset={$offset}&marker={$TRAVEL_PAYOUT_MARKER}&signature={$sig2}";
 
-            $SignatureString2 = "" . $TRAVEL_PAYOUT_TOKEN . ":" . $TRAVEL_PAYOUT_MARKER . ":" . $limit . ":" . $offset . ":" . $roomsCount . ":" . $searchId . ":" . $sortAsc . ":" . $sortBy;
-            $sig2 = md5($SignatureString2);
+                $maxAttempts = 10;
+                $attempt = 0;
+                $retryInterval = 2;
 
-            $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId=' . $searchId . '&limit=10&sortBy=price&sortAsc=1&roomsCount=10&offset=0&marker=299178&signature=' . $sig2;
+                while ($attempt < $maxAttempts) {
+                    $response2 = Http::withoutVerifying()->timeout(0)->get($url2);
+                    $jsonResponse = $response2->json();
 
-            // Polling for search completion
-            $searchComplete = false;
-            $maxAttempts = 10;
-            $attempt = 0;
-            $retryInterval = 2; // seconds
-
-            while (!$searchComplete && $attempt < $maxAttempts) {
-                $response2 = Http::withoutVerifying()
-                    ->timeout(0)
-                    ->get($url2);
-
-                $jsonResponse = json_decode($response2, true);
-
-                if (isset($jsonResponse['errorCode']) && $jsonResponse['errorCode'] === 4) {
-                    // Search not finished, wait and retry
+                    if (!isset($jsonResponse['errorCode']) || $jsonResponse['errorCode'] !== 4) {
+                        return view('hotel_result', ['hotels' => $jsonResponse])->render();
+                    }
                     sleep($retryInterval);
                     $attempt++;
-                } else {
-                    $searchComplete = true;
                 }
-            }
-
-            if (!$searchComplete) {
-                // Handle the case where the search did not complete
                 return response()->json(['error' => 'Search did not complete in time.'], 408);
-            }
-
-            if ($searchComplete && !empty($jsonResponse)) {
-                return view('hotel_result', ['hotels' => $jsonResponse]);
             } else {
                 return 'search id not found';
             }
-
-        } else {
-            return 'search id not found';
+        } catch (\Exception $e) {
+            return 'An error occurred: ' . $e->getMessage();
         }
-
-    } else {
-        return 2;
-    }
+    });
 }
 
 
    //HOTEL DETAIL Page
 		//start hotel detail
-     public function hotel_detail($id,Request $request) {
+public function hotel_detail($id, Request $request)
+{
+    $parts = explode('-', $id, 3);
+    if (count($parts) < 2) {
+        abort(404, 'Invalid hotel ID format');
+    }
 
-            $currentTime  = now();
-            $checkin = $request->get('checkin');
-            $checkout = $request->get('checkout');
-            $lslugid="";
-            $lslug="";
+    $location_slugid = str_pad($parts[0], 5, '0', STR_PAD_LEFT);
+    $hotelid = $parts[1];
 
-            $TPRoomtype = collect();
-            $gethotel = collect();
+    $cacheKey = "hotel_detail_{$hotelid}";
+    $hotelData = Cache::remember($cacheKey, 3600, function () use ($hotelid) {
+        return DB::table('TPHotel as h')
+            ->select('h.*', 'l.cityName')
+            ->leftJoin('TPLocations as l', 'l.id', '=', 'h.location_id')
+            ->where('h.id', $hotelid)
+            ->first();
+    });
 
-            $rooms = [];
-            $uniqueAmenities =[];
-            $locid = 0;
-            $hotelid = null;
-            $slug = "";
-            $locname = "";
-            $ctname = "";
-            $LocationId =null;
-            $location_slugid=null;
-            // Extract only the first two parts (location ID and hotel ID) from the URL
-            $parts = explode('-', $id, 3);
-            if (count($parts) >= 2) {
-                $LocationId = str_pad($parts[0], 5, '0', STR_PAD_LEFT);
-                $location_slugid = $LocationId;
-                $hotelid = $parts[1];
+    if (!$hotelData) {
+        abort(404, 'Hotel not found');
+    }
 
-                // We don't care about the slug in the URL anymore
-                // Just check if the hotel exists and get its data
-                $hotelExists = DB::table('TPHotel')->where('id', $hotelid)->exists();
-                if ($hotelExists) {
-                    // Get the actual hotel data to see what slugid and slug it has
-                    $actualHotel = DB::table('TPHotel')->select('slugid', 'slug')->where('id', $hotelid)->first();
+    $correctSlug = strtolower(str_replace(' ', '_', str_replace('#', '!', $hotelData->slug)));
+    $correctUrl = 'hd-' . $hotelData->slugid . '-' . $hotelid . '-' . $correctSlug;
+    if ($request->path() !== $correctUrl) {
+        return redirect($correctUrl, 301);
+    }
 
-                    // If the hotel exists but the location ID doesn't match, redirect to the correct URL
-                    // Or if we need to ensure the URL has the correct slug format
-                    $correctSlug = strtolower(str_replace(' ', '_', str_replace('#', '!', $actualHotel->slug)));
-
-                    // Check if the current URL already has the correct format
-                    $currentUrl = 'hd-' . $location_slugid . '-' . $hotelid;
-                    $correctUrl = 'hd-' . $actualHotel->slugid . '-' . $hotelid . '-' . $correctSlug;
-
-                    // Only redirect if the URL needs correction
-                    if ($currentUrl !== $correctUrl && $request->path() !== $correctUrl) {
-                        return redirect($correctUrl);
-                    }
-                }
-            }
+    $currentTime = now();
+    $checkin = $request->get('checkin');
+    $checkout = $request->get('checkout');
+    $lslugid = $hotelData->slugid;
+    $lslug = $hotelData->slug;
+    $locid = $hotelData->location_id;
+    $hlid = $locid;
+    $searchresults = [$hotelData];
 
            $getloclink = DB::table('Temp_Mapping as m')
            ->select('m.LocationId','m.cityName')
@@ -9578,194 +8908,106 @@ if (!$getparent->isEmpty() && $getparent[0]->LocationLevel != 1) {
 
        }
 
-       public function get_hotel_landing_result(request $request){
+public function get_hotel_landing_result(Request $request)
+{
+    $chkin = $request->get('checkin');
+    $checout = $request->get('checkout');
+    $guest = $request->get('guest');
+    $landid = $request->get('id');
+    $slug = $request->get('slug');
+    $id = str_replace('ld', ' ', $landid);
 
-        $start  =  date("H:i:s");
-        $searchresults =collect();
-        $getval = $request->get('checkin') .'_'.$request->get('checkout');
-        $chkin = $request->get('checkin');
-        $checout = $request->get('checkout');
+    $cacheKey = "hotel_landing_{$id}_{$slug}_{$chkin}_{$checout}_{$guest}";
+    return Cache::remember($cacheKey, 3600, function () use ($request, $id, $slug) {
+        $getlanding = DB::table('TPHotel_landing')->select('Amenities', 'Rating', 'location_id')->where('id', $id)->where('slug', $slug)->first();
 
-        $rooms = $request->get('rooms');
-        $guest = $request->get('guest');
-        $slug = $request->get('slug');
-        $landid =  $request->get('id');
-         $id = str_replace('ld',' ',$landid);
-        $locationid =  $request->get('locationid');
-        //new code
-        $md  =  date("H:i:s");
-        $getlanding = DB::table('TPHotel_landing')->select('Amenities','Rating','location_id')->where('id', $id)->where('slug', $slug)->get();
-
-
-        $amenities=[];
-        $Rating=[];
-        $locationid = "";
-        if(!$getlanding->isEmpty()){
-            $locationid = $getlanding[0]->location_id;
-
-           $amenities="";
-			$Rating="";
-			$locationid = "";
-			if(!$getlanding->isEmpty()){
-				$locationid = $getlanding[0]->location_id;
-				if($getlanding[0]->Amenities !=""){
-
-					// if(is_string($getlanding[0]->Amenities)){
-					//     $amenities = explode(',', $getlanding[0]->Amenities);
-					// }
-
-					if(!empty($getlanding[0]->Amenities)){
-						$amenities = json_decode($getlanding[0]->Amenities);
-					}
-				}
-				$Rating='';
-				if($getlanding[0]->Rating !=""){
-
-					 $rating = $getlanding[0]->Rating;
-					if(!empty($rating)){
-						$Rating = json_decode($getlanding[0]->Rating);
-					}
-				}
+        if (!$getlanding) {
+            return 'landing not found';
         }
-        $end  =  date("H:i:s");
 
-       //end new code
+        $locationid = $getlanding->location_id;
+        $amenities = json_decode($getlanding->Amenities, true) ?: [];
+        $Rating = json_decode($getlanding->Rating, true) ?: [];
 
+        $checkinDate = $request->get('checkin');
+        $checkoutDate = $request->get('checkout');
+        $adultsCount = $request->get('guest');
+        $customerIP = '49.156.89.145';
+        $childrenCount = '1';
+        $chid_age = '10';
+        $lang = 'en';
+        $currency = 'USD';
+        $waitForResult = '0';
+        $iata = $locationid;
 
-         session(['checkin' => $getval]);
-         session(['rooms' => $rooms]);
-         session(['guest' => $guest]);
+        $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869";
+        $TRAVEL_PAYOUT_MARKER = "299178";
 
-         //new code start
-         $checkinDate =  $chkin;
-         $checkoutDate = $checout;
-         $adultsCount = $guest;
-         $customerIP = '49.156.89.145';
-         $childrenCount = '1';
-         $chid_age = '10';
-         $lang = 'en';
-         $currency ='USD';
-         $waitForResult ='0';
-         $iata= $locationid ;//24072
+        $signatureString = "{$TRAVEL_PAYOUT_TOKEN}:{$TRAVEL_PAYOUT_MARKER}:{$adultsCount}:{$checkinDate}:{$checkoutDate}:{$chid_age}:{$childrenCount}:{$iata}:{$currency}:{$customerIP}:{$lang}:{$waitForResult}";
+        $signature = md5($signatureString);
 
-         $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869";
-         $TRAVEL_PAYOUT_MARKER = "299178";
+        $url = "http://engine.hotellook.com/api/v2/search/start.json?cityId={$iata}&checkIn={$checkinDate}&checkOut={$checkoutDate}&adultsCount={$adultsCount}&customerIP={$customerIP}&childrenCount={$childrenCount}&childAge1={$chid_age}&lang={$lang}&currency={$currency}&waitForResult={$waitForResult}&marker={$TRAVEL_PAYOUT_MARKER}&signature={$signature}";
 
-        $SignatureString = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$adultsCount.":".
-         $checkinDate.":".
-         $checkoutDate.":".
-         $chid_age.":".
-         $childrenCount.":".
-         $iata.":".
-         $currency.":".
-         $customerIP.":".
-         $lang.":".
-         $waitForResult;
+        try {
+            $response = Http::withoutVerifying()->get($url);
+            $data = $response->json();
 
-          $signature = md5($SignatureString);
-          $url ='http://engine.hotellook.com/api/v2/search/start.json?cityId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;
+            if ($response->successful() && !empty($data['searchId'])) {
+                $searchId = $data['searchId'];
+                $limit = 0;
+                $offset = 0;
+                $roomsCount = 0;
+                $sortAsc = 1;
+                $sortBy = 'price';
 
-             $response = Http::withoutVerifying()->get($url);
+                $signatureString2 = "{$TRAVEL_PAYOUT_TOKEN}:{$TRAVEL_PAYOUT_MARKER}:{$limit}:{$offset}:{$roomsCount}:{$searchId}:{$sortAsc}:{$sortBy}";
+                $sig2 = md5($signatureString2);
 
-         if ($response->successful()) {
-             $data = json_decode($response);
-             if(!empty($data)){
-               $searchId = $data->searchId;
-             $limit =0;
-             $offset=0;
-             $roomsCount=0;
-             $sortAsc=1;
-             $sortBy='price';
+                $url2 = "http://engine.hotellook.com/api/v2/search/getResult.json?searchId={$searchId}&limit={$limit}&sortBy={$sortBy}&sortAsc={$sortAsc}&roomsCount={$roomsCount}&offset={$offset}&marker={$TRAVEL_PAYOUT_MARKER}&signature={$sig2}";
 
-            $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
-             $sig2 =  md5($SignatureString2);
+                $response2 = Http::withoutVerifying()->timeout(30)->get($url2);
+                $responseData = $response2->json();
 
-            $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=0&sortBy=price&sortAsc=1&roomsCount=0&offset=0&marker=299178&signature='.$sig2;
-            $gethoteltype =collect();
-            $response2 = Http::withoutVerifying()->timeout(30)->get($url2);
-            $responseData = $response2->json();
-                if ($responseData['status'] === 'error' && $responseData['errorCode'] === 4) {
-                    $status = 4;
-                    return 'Search is not finished.';
-                }else{
-                    $status = 1;
-                }
-                 $maxRetries = 10;
-                     if ($response2->successful()) {
-                        $hotel = json_decode($response2);
-                        $idArray = array();
-                        foreach ($hotel->result as $hotelInfo) {
-                            if (isset($hotelInfo->id)) {
-                                $idArray[] = $hotelInfo->id;
-                            }
-                        }
-                        $st2  =  date("H:i:s");
+                if ($responseData['status'] === 'ok') {
+                    $hotel = json_decode($response2->body());
+                    $idArray = array_column($hotel->result, 'id');
 
+                    $searchresults = DB::table('TPHotel as tph')
+                        ->select('tph.hotelid', 'tph.id', 'tph.name', 'tph.slug', 'tph.location_id as loc_id', 'tph.stars', 'tph.pricefrom', 'tph.rating', 'tph.amenities', 'tph.distance', 'tph.room_aminities', 'tph.Languages')
+                        ->whereIn('tph.hotelid', $idArray)
+                        ->when(!empty($amenities) || !empty($Rating), function ($query) use ($amenities, $Rating) {
+                            $query->where(function ($q) use ($amenities, $Rating) {
+                                if (!empty($amenities)) {
+                                    foreach ($amenities as $amenity) {
+                                        $q->orWhere('tph.amenities', 'LIKE', '%' . $amenity . '%')
+                                            ->orWhere('tph.room_aminities', 'LIKE', '%' . $amenity . '%')
+                                            ->orWhere('tph.Languages', 'LIKE', '%' . $amenity . '%');
+                                    }
+                                }
+                                if (!empty($Rating)) {
+                                    $q->orWhereIn('tph.stars', $Rating);
+                                }
+                            });
+                        })
+                        ->paginate(5);
 
-                               $searchresults = DB::table('TPHotel as tph')
-                          ->select('tph.hotelid', 'tph.id', 'tph.name', 'tph.slug','tph.location_id as loc_id', 'tph.stars', 'tph.pricefrom', 'tph.rating', 'tph.amenities','tph.distance','tph.room_aminities','tph.Languages')
-                            ->whereIn('tph.hotelid',$idArray) ;
-                          if (!empty($amenities) || !empty($Rating)) {
-                              $searchresults->where(function ($query) use ($amenities, $Rating) {
-
-                                  if (!empty($amenities)) {
-                                      foreach ($amenities as $amenity) {
-                                          $query->orWhere('tph.amenities', 'LIKE', '%' . $amenity . '%');
-                                      }
-                                  }
-                                  if (!empty($amenities)) {
-                                      foreach ($amenities as $amenity) {
-                                          $query->orWhere('tph.room_aminities', 'LIKE', '%' . $amenity . '%');
-                                      }
-                                  }
-                                  if (!empty($amenities)) {
-                                      foreach ($amenities as $amenity) {
-                                          $query->orWhere('tph.Languages', 'LIKE', '%' . $amenity . '%');
-                                      }
-                                  }
-                              if (!empty($Rating)) {
-                                  $query->orWhereIn('tph.stars', $Rating);
-                              }
-                          });
-                      }
-
-                      $searchresults = $searchresults->paginate(5);
-
-                      // Manually append existing query parameters to pagination links
-                      $searchresults->appends($request->except('_token'));
-
-
+                    $searchresults->appends($request->except('_token'));
                     $searchresults->setPath('hotel_landing.html');
 
+                    $getloc = DB::table('TPLocations')->select('cityName', 'countryName')->where('id', $locationid)->first();
+                    $cityName = $getloc->cityName ?? '';
+                    $countryname = $getloc->countryName ?? '';
 
-                    $getloc = DB::table('TPLocations')->select('cityName','countryName')->where('id',$locationid)->limit(1)->get();
-						 $cityName ="";
-					     $countryname ="";
-							if(!$getloc->isEmpty()){
-								$lname2 =$getloc[0]->cityName;
-								$countryname = $getloc[0]->countryName;
-								$cityName =$getloc[0]->cityName;
-							}
+                    return view('frontend.hotel.get_hotel_landing_result_withdate', compact('hotel', 'locationid', 'searchresults', 'amenities', 'Rating', 'cityName', 'countryname'))->render();
+                }
+            }
+        } catch (\Exception $e) {
+            return 'An error occurred: ' . $e->getMessage();
+        }
 
-                      // end save id if not found in TPhotel table
-
-
-              return view('frontend.hotel.get_hotel_landing_result_withdate', ['hotels' => $hotel, 'locid' => $locationid, 'searchresults' => $searchresults, 'amenities' => $amenities, 'Rating' => $Rating, 'cityName' => $cityName, 'countryname' => $countryname])->render();
-
-
-                     }
-
-
-             }else{
-                 return 'search id not found';
-             }
-
-         } else {
-
-             return 2;
-         }
-
-       }
+        return 'search id not found';
+    });
+}
 	   }
      public function saveNearbyhotel_hotellist(request $request){
 
