@@ -26,7 +26,8 @@
                    <a href="{{ route('edit_review',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-edit"></i>Edit Review</a>
                    <a href="{{ route('edit_hotel_faqs',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-edit"></i>Edit Faqs</a>  
                    <a href="{{ route('edit_hotel_category',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-edit"></i>Edit Category</a>
-                      <a href="{{ route('edit_hotel_landing',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-edit"></i>Edit Landing Page</a>   
+                      <a href="{{ route('edit_hotel_landing',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-edit"></i>Edit Landing Page</a>
+                      <a href="{{ route('qa_hotel',[$value->hotelid])}}" target="_blank" class="margin-l"> <i class="fas fa-question-circle"></i> Question & Answer</a>
                   </td>
                    
                  </tr>

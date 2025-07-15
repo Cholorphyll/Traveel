@@ -109,37 +109,150 @@ class ListingController extends Controller
         return view('listing.location');
     }
 
-    public function search_location(request $request) {
-        $val = $request->get('value');
-        
-        $getlisting = DB::table('Location')
-            ->leftJoin('Country', 'Country.CountryId', '=', 'Location.CountryId')
-            ->select('Location.*', 'Country.Name as countryname')
-            ->where(function ($query) use ($val) {
-                $query->where('Location.LocationId', 'LIKE', '%' . $val . '%')
-                      ->orWhere('Location.Name', 'LIKE', '%' . $val . '%')
-                      ->orWhere('Location.Slug', 'LIKE', '%' . $val . '%');
-            })
-            ->limit(10)
-            ->get();
-            
-        if ($getlisting->isEmpty()) {
-            $query = DB::table('Location AS l')
-                ->select('l.*', 'c.Name as countryname')
-                ->join('Country AS c', 'l.CountryId', '=', 'c.CountryId')
-                ->where(function ($query) use ($val) {
-                    $query->where(DB::raw("LOWER(CONCAT(l.Name, ' ', c.Name))"), 'LIKE', '%' . strtolower($val) . '%');
-                })
-                ->limit(10);
-            
-            $getlisting = $query->get();
+    /**
+     * Get location content for editing
+     */
+    public function getLocationContent($id)
+    {
+        try {
+            $location = DB::table('Location')
+                ->leftJoin('Country', 'Country.CountryId', '=', 'Location.CountryId')
+                ->select('Location.*', 'Country.Name as countryname')
+                ->where('Location.LocationId', $id)
+                ->first();
+
+            if (!$location) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Location not found'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'name' => $location->Name,
+                    'url' => $location->Slug,
+                    'content' => $location->About ?? ''
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load location content: ' . $e->getMessage()
+            ], 500);
         }
-           
-        return view('listing.filter_location', ['listing' => $getlisting]);
     }
+
+    /**
+     * Update location content
+     */
+    public function updateLocationContent(Request $request)
+    {
+       $locationId = $request->get('location_id');
+       $content = $request->get('content');
+       
+       DB::table('Location')
+       ->where('LocationId', $locationId)
+       ->update([
+           'About' => $content,
+           'updated_at' => now()
+       ]);
+       return response()->json([
+           'success' => true,
+           'message' => 'Location content updated successfully'
+       ]);  
+
+    }
+
+    public function search_location(Request $request) 
+{
+    $val = trim($request->get('value'));
+
+    try {
+        // Extract locationId and name from URL formats like lo-129700020031-london-england
+        $locationId = null;
+        $locationName = null;
+        
+        // Check for lo-number-name format
+        if (preg_match('/lo-([0-9]+)-(.+)/', $val, $matches)) {
+            $locationId = $matches[1];
+            $locationName = str_replace('-', ' ', $matches[2]);
+        }
+        // Check for at-number-name format
+        else if (preg_match('/at-([0-9]+)-(.+)/', $val, $matches)) {
+            $locationId = $matches[1];
+            $locationName = str_replace('-', ' ', $matches[2]);
+        }
+        // Check if it's a numeric value
+        else if (is_numeric($val)) {
+            $locationId = $val;
+        }
+        
+        // Standard search query
+        $query = DB::table('Location')
+            ->leftJoin('Country', 'Country.CountryId', '=', 'Location.CountryId')
+            ->select(
+                'Location.*', 
+                'Country.Name as countryname',
+                DB::raw('0 as show_in_index')
+            )
+            ->where('Location.IsActive', 1); // Only fetch active locations
+        
+        // Apply search filters if a search value is provided
+        if (!empty($val)) {
+            $query->where(function($q) use ($val, $locationId, $locationName) {
+                // Search by extracted ID if available
+                if ($locationId !== null) {
+                    $q->orWhere('Location.LocationId', $locationId)
+                      ->orWhere('Location.slugid', $locationId);
+                }
+                
+                // Search by extracted name if available
+                if ($locationName !== null) {
+                    $q->orWhere('Location.Name', 'like', '%' . $locationName . '%');
+                }
+                
+                // Standard search by original value
+                $q->orWhere('Location.Name', 'like', '%' . $val . '%')
+                  ->orWhere('Location.Slug', 'like', '%' . $val . '%');
+            });
+        }
+        
+        $listing = $query->orderBy('Location.Name', 'asc')->limit(2)->get();
+        
+        // Make sure we have at least one record for the modal to work with
+        if ($listing->isEmpty()) {
+            // Create a stdClass object instead of an array to match the expected type
+            $emptyLocation = new \stdClass();
+            $emptyLocation->LocationId = 0;
+            $emptyLocation->Name = '';
+            $emptyLocation->About = '';
+            $emptyLocation->countryname = '';
+            $emptyLocation->show_in_index = 0;
+            
+            return view('listing.filter_location', ['listing' => collect([$emptyLocation])]);
+        }
+        
+        return view('listing.filter_location', ['listing' => $listing]);
+        
+    } catch (\Exception $e) {
+        // Return a view with an empty collection and a placeholder record for the modal
+        $emptyLocation = new \stdClass();
+        $emptyLocation->LocationId = 0;
+        $emptyLocation->Name = '';
+        $emptyLocation->About = '';
+        $emptyLocation->countryname = '';
+        $emptyLocation->show_in_index = 0;
+        
+        return view('listing.filter_location', ['listing' => collect([$emptyLocation])]);
+    }
+}
+
      
     public function search_parentcon(Request $request)
-        {
+    {
         $search = $request->get('val');
         
         $result = array();
@@ -161,7 +274,7 @@ class ListingController extends Controller
     public function add_faq(){
         return view('listing.add_faq');
     }
-    Public function store_loc_faq(request $request){
+    Public function store_loc_faq(Request $request){
         $request->validate([
             'ctname' => 'required',
             'question' => 'required',
@@ -202,7 +315,7 @@ class ListingController extends Controller
         return view('listing.edit_faq',['getfaq'=>$getfaq , 'getloc'=>$getloc]);
     } 
 
-    public function update_edit(request $request){
+    public function update_edit(Request $request){
          $id =  $request->get('faqId');
          $locationid = $request->get('locationid');
          $answers = $request->input('answer');
@@ -258,7 +371,7 @@ class ListingController extends Controller
     }
 
 
-    public function add_location_faq(request $request){
+    public function add_location_faq(Request $request){
         $question = str_replace('?','',$request->get('checkboxText')) ;
 
         $locationid = $request->get('locationid');

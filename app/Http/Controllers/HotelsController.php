@@ -6,6 +6,7 @@ use App\Models\TPHotel;
 use App\Models\HotelQuestion;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 class HotelsController extends Controller
 {
     public function index()
@@ -14,26 +15,26 @@ class HotelsController extends Controller
     }
     public function filter_hotel(request $request){
         $val =  $request->get('value');
-        
+
             $getlisting = DB::table('TPHotel')
             ->select('TPHotel.*')
                 ->where(function ($query) use ($val) {
                         $query->where('TPHotel.id', '=', $val)
-                        ->orWhere('TPHotel.name', '=', $val);                     
-                  
+                        ->orWhere('TPHotel.name', '=', $val);
+
                   if (strpos($val, '-') !== false) {
                       $urlParts = explode('-', $val);
                       $id = isset($urlParts[2]) ? $urlParts[2] : null;
-                      
+
                       error_log('Extracted ID: ' . $id);
-                      
+
                       if ($id) {
                         $query->orWhere('TPHotel.id', $id);
                       }
                   }
               })->limit(2)
               ->get();
-            
+
             return view('hotels.filter_hotel',['hotellisting'=>$getlisting]);
     }
 
@@ -48,33 +49,33 @@ class HotelsController extends Controller
 		 // Log all data from the request
     Log::info('Request Data:', $request->all());
         // Validate the input
-        $val =  $request->get('value'); 
+        $val =  $request->get('value');
         $getlisting  = DB::table('TPHotel')
         ->select('TPHotel.*')
         ->where(function ($query) use ($val) {
             $query->where('TPHotel.id', '=', $val)
                   ->orWhere('TPHotel.name', '=', $val);
-            
+
             if (strpos($val, '-') !== false) {
                 $urlParts = explode('-', $val);
                 $id = isset($urlParts[2]) ? $urlParts[2] : null;
-                
+
                 error_log('Extracted ID: ' . $id);
-                
+
                 if ($id) {
                     $query->orWhere('TPHotel.id', $id);
                 }
             }
         })->limit(2)
-        ->get(); 
+        ->get();
         // Return the results to the view
         return view('hotels', compact('hotels')); // Ensure you have a view to display results
     }
 
- public function edit_hotel($id){ 
+ public function edit_hotel($id){
         $getcountry = DB::table('Country')->get();
         $TPHotel_types = DB::table('TPHotel_types')->get();
-     
+
         $gethotel = DB::table('TPHotel')
         ->Leftjoin('TPLocations', 'TPHotel.location_id', '=', 'TPLocations.id')
         ->select('TPHotel.*', 'TPLocations.countryName','TPLocations.cityName as Lname')
@@ -89,18 +90,18 @@ class HotelsController extends Controller
         $gettemp = DB::table('Temp_Mapping')->select('Tid')->where('LocationId',$location_id)->get();
         $Tid ="";
         if(!$gettemp->isEmpty()){
-            $Tid = $gettemp[0]->Tid;  
+            $Tid = $gettemp[0]->Tid;
         }
         $Neighborhoods = collect();
-       
+
         if($Tid != ""){
              $Neighborhoods = DB::table('Neighborhood')->where('LocationID',$Tid)->get();
         //  return   print_r($Neighborhoods);
         }else{
             $Neighborhoods = DB::table('Neighborhood')->get();
         }
-	 
-          
+
+
          $getfaq = DB::table('HotelQuestion')
         ->leftJoin('TPHotel', 'HotelQuestion.HotelId', '=', 'TPHotel.hotelid')
 
@@ -108,11 +109,11 @@ class HotelsController extends Controller
         ->where('HotelQuestion.HotelId', $id)
         ->get();
 
-        
+
         $gethid = DB::table('TPHotel')->where('hotelid',$id)->get();
       //  $hotel_id = $gethid[0]->hotelid;
        // $getreviews =  DB::table('HotelReview')->where('HotelId',$id)->where('IsApprove',0)->get();
-        
+
         $getreviews = DB::table('HotelReview')
     ->where('HotelId', $id)
     ->where('ReviewType', 'Regular') // Filter for anonymous messages
@@ -123,21 +124,21 @@ class HotelsController extends Controller
     ->where('ReviewType', 'Anonymous') // Filter for anonymous messages
     ->get();
 
-      
+
         return view('hotels.edit_hotel',['gethotel'=>$gethotel,  'anonymousMessages' => $anonymousMessages,'id' => $id,'getfaq'=>$getfaq,'getreviews'=>$getreviews,'gethid'=>$gethid, 'country'=>$getcountry,'getHotelCountry'=>$getHotelCountry,'neighborhoodlist'=>$Neighborhoods,'TPHotel_types'=>$TPHotel_types]);
     }
     public function searchCity(request $request){
         $search = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('TPLocations')
             ->Leftjoin('Country', 'TPLocations.countryName', '=', 'Country.Name')
             ->select('TPLocations.locationId','TPLocations.cityName as lname','TPLocations.countryName','Country.CountryId')
             ->where('TPLocations.cityName', 'LIKE', '%' . $search . '%')
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $loc) {
             $result[] = [
                 'id' => $loc->locationId,
@@ -146,35 +147,35 @@ class HotelsController extends Controller
                 'countryid' => $loc->CountryId
             ];
         }
-    
+
         return response()->json($result);
     }
 
     public function updateHotel(request $request,$id){
 
-   
+
         $request->validate([
             'hotel_name' => 'required',
-            'slug' => 'required',  
+            'slug' => 'required',
 			'phone' => ['nullable', 'regex:/^\+?[0-9\s\(\)-]+$/'],
-        ]);   
+        ]);
 
          $city = $request->get('ctname');
         $county = $request->get('country');
         $ct =  $city.', '. $county;
 		$c = 0;
         if( $city  != ""){
-			
+
             $getct = DB::table('TPLocations')->where('fullName',$ct)->get();
 			if(!$getct->isEmpty()){
 			$c = 1;
 			   $cityId = $getct[0]->id;
                $iata = $getct[0]->iata;
 			}
-          
+
         }
-        
-        
+
+
         $highlightsInput = $request->get('Highlights');
 
 // Check if input is already a valid JSON string
@@ -221,7 +222,7 @@ if (!empty($addressline1) && !empty($addressline2)) {
         $phone = preg_replace('/^\+/', '', $phone); // Remove the "+" at the start if it exists
     }
 $existingHotel = DB::table('TPHotel')->where('id', $id)->first();
-    
+
     // Merge new and old amenities
 $newAmenities = $request->get('amenities');
 $oldAmenities = $existingHotel->facilities;
@@ -259,7 +260,7 @@ if (!empty($newRoomAminities)) {
            // 'checkOut'=>$request->get('checkOut'),
             'Pincode'=>$request->get('pincode'),
             'Latitude'=>$request->get('Latitude'),
-            'longnitude'=>$request->get('Longitude'), 
+            'longnitude'=>$request->get('Longitude'),
             'Website'=>$request->get('website'),
             'Phone'=>$phone,
             'Email'=>$request->get('email'),
@@ -268,7 +269,7 @@ if (!empty($newRoomAminities)) {
             'stars'=>$request->get('stars'),
             'pricefrom'=>$request->get('pricefrom'),
             'propertyType'=>$request->get('propertyType'),
-            'facilities' => $mergedAmenities, 
+            'facilities' => $mergedAmenities,
             'shortFacilities'=>$request->get('shortFacilities'),
             'Languages'=>$request->get('Languages'),
             'room_aminities' => $mergedRoomAminities,
@@ -276,9 +277,9 @@ if (!empty($newRoomAminities)) {
 
 
             'NearestStations'=> $jsonData,
-           
+
             'dt_created'=>now(),
-          
+
         );
         if ($c == 1 && $request->has('LocationId')) {
     $data['location_id'] = $request->get('LocationId');
@@ -287,12 +288,12 @@ if (!empty($newRoomAminities)) {
 
         DB::table('TPHotel')->where('id',$id)->update($data);
      //   return $request->get('neighborhood');
-       
+
         if ($request->has('faqId')) {
             $faqIds = $request->get('faqId');
             $questions = $request->get('question');
             $answers = $request->get('answer');
-        
+
             for ($i = 0; $i < count($faqIds); $i++) {
                 $faqData = array(
                     'Question' => $questions[$i],
@@ -300,16 +301,16 @@ if (!empty($newRoomAminities)) {
                     'IsActive' => 1,
                     'CreatedDate' => now(),
                 );
-        
+
                 DB::table('HotelQuestion')->where('hotelQuestionId', $faqIds[$i])->update($faqData);
             }
         }
-        
+
         if ($request->has('faqId')) {
             $faqIds = $request->get('faqId');
             $questions = $request->get('question');
             $answers = $request->get('answer');
-        
+
             for ($i = 0; $i < count($faqIds); $i++) {
                 $faqData = [
                     'Question' => $questions[$i],
@@ -317,15 +318,15 @@ if (!empty($newRoomAminities)) {
                     'IsActive' => 1,
                     'CreatedDate' => now(),
                 ];
-        
+
                 DB::table('HotelQuestion')->where('hotelQuestionId', $faqIds[$i])->update($faqData);
             }
         }
-        
+
         if ($request->has('new_question') && $request->has('new_answer')) {
             $newQuestions = $request->get('new_question');
             $newAnswers = $request->get('new_answer');
-        
+
             for ($i = 0; $i < count($newQuestions); $i++) {
                 if (!empty($newQuestions[$i]) && !empty($newAnswers[$i])) {
                     $faqData = [
@@ -335,12 +336,12 @@ if (!empty($newRoomAminities)) {
                         'IsActive' => 1,
                         'CreatedDate' => now(),
                     ];
-        
+
                     DB::table('HotelQuestion')->insert($faqData);
                 }
             }
         }
-        
+
   // Handle new reviews
   if ($request->has('new_review') && $request->has('new_rating')) {
     $newReviews = $request->get('new_review');
@@ -354,7 +355,7 @@ if (!empty($newRoomAminities)) {
             $userEmail = $randomUser->EmailAddress;
 
             $reviewData = [
-                'id' => $id,
+                'HotelId' => $id, // Add the HotelId field
                 'Description' => $newReviews[$i],
                 'Rating' => $newRatings[$i],
                 'Name' => $userName,
@@ -383,13 +384,13 @@ if ($request->has('reviewId')) {
         DB::table('HotelReview')->where('HotelReviewId', $reviewIds[$i])->update($reviewData);
     }
 }
-        
+
 
         return redirect()->route('hotels')
-        ->with('success','Hotel Updated successfully.'); 
+        ->with('success','Hotel Updated successfully.');
 
 
-    
+
     }
 
     public function addReview(Request $request)
@@ -398,7 +399,7 @@ if ($request->has('reviewId')) {
             'review' => 'required|string|max:5000',
             'hotelId' => 'required|integer',
         ]);
-    
+
         try {
             $reviewData = [
                 'HotelId' => $validated['hotelId'],
@@ -407,29 +408,29 @@ if ($request->has('reviewId')) {
                 'IsApprove' => 1, // Default to approved
                 'CreatedOn' => now(),
             ];
-    
+
             DB::table('HotelReview')->insert($reviewData);
-    
+
             return response()->json(['success' => true, 'message' => 'Review added successfully.']);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Failed to add review. Error: ' . $e->getMessage()]);
         }
     }
-    
+
   	public function add_hotel(){
         $TPHotel_types = DB::table('TPHotel_types')->get();
         $Neighborhoods = DB::table('Neighborhood')->get();
 
-      
+
         return view('hotels.add_hotel',['neighborhoodlist'=>$Neighborhoods,'TPHotel_types'=>$TPHotel_types]);
-     }
+    }
 
   public function storeHotel(request $request){
         $request->validate([
             'hotel_name' => 'required',
             'slug' => 'required',
 			'phone' => ['nullable', 'regex:/^\+?[0-9\s\(\)-]+$/'],
-        ]);   
+        ]);
 
         $city = $request->get('ctname');
         $county = $request->get('country');
@@ -492,16 +493,16 @@ if (!empty($addressline1) && !empty($addressline2)) {
             'Highlights'=>$request->get('Highlights'),
             'Pincode'=>$request->get('pincode'),
             'Latitude'=>$request->get('Latitude'),
-            'longnitude'=>$request->get('Longitude'), 
+            'longnitude'=>$request->get('Longitude'),
             'Website'=>$request->get('website'),
-            'phone' => $phone, 
+            'phone' => $phone,
             'Email'=>$request->get('email'),
             'about'=>$request->get('about'),
             'short_description'=>$request->get('short_description'),
             'stars'=>$request->get('stars'),
             'pricefrom'=>$request->get('pricefrom'),
             'propertyType'=>$request->get('propertyType'),
-            'amenities'=>$request->get('amenities'), 
+            'amenities'=>$request->get('amenities'),
             'shortFacilities'=>$request->get('shortFacilities'),
             'Languages'=>$request->get('Languages'),
             'room_aminities'=>$request->get('room_aminities'),
@@ -525,8 +526,8 @@ if (!empty($addressline1) && !empty($addressline2)) {
             if(!$getnb->isEmpty()) {
                 $neighborhood = array(
                     'neibourhood_id' => $getnb[0]->NeighborhoodId,
-                    'display_name' => $getnb[0]->Name,             
-                    'hotelid'=> $hotelId,  
+                    'display_name' => $getnb[0]->Name,
+                    'hotelid'=> $hotelId,
                     'location_id'=> $getnb[0]->LocationID,
                 );
                 DB::table('TPhotelNbData')->insert($neighborhood);
@@ -537,7 +538,7 @@ if (!empty($addressline1) && !empty($addressline2)) {
         if ($request->has('new_question') && $request->has('new_answer')) {
             $newQuestions = $request->get('new_question');
             $newAnswers = $request->get('new_answer');
-        
+
             for ($i = 0; $i < count($newQuestions); $i++) {
                 if (!empty($newQuestions[$i]) && !empty($newAnswers[$i])) {
                     $faqData = [
@@ -561,7 +562,7 @@ if (!empty($addressline1) && !empty($addressline2)) {
                 if (!empty($newReviews[$i]) && !empty($newRatings[$i])) {
                     // Fetch a random user
                     $randomUser = DB::table('UsersNames')->inRandomOrder()->first();
-                    
+
                     $reviewData = [
                         'HotelId' => $hotelId,
                         'Description' => $newReviews[$i],
@@ -580,13 +581,13 @@ if (!empty($addressline1) && !empty($addressline2)) {
             ->with('success', 'Hotel Added successfully.');
     }
 
-    // manage reviews 
+    // manage reviews
 
     public function edit_review($id){
         $gethid = DB::table('TPHotel')->where('hotelid',$id)->get();
       //  $hotel_id = $gethid[0]->hotelid;
         $getreviews =  DB::table('HotelReview')->where('HotelId',$id)->where('IsApprove',0)->get();
-        
+
         return view('hotels.edit_hotel_reviews',['hotelreview'=>$getreviews,'gethid'=>$gethid]);
     }
 
@@ -602,22 +603,22 @@ if (!empty($addressline1) && !empty($addressline2)) {
 
         if(!empty($request->get('filter_option'))){
             //filter with options like aprove
-            
+
             $filter_option = $request->get('filter_option');
             $getreviews =  DB::table('HotelReview')->where('HotelId',$id)->where('IsApprove',$filter_option)->orderby('HotelReviewId',$orderby)->get();
         }else{
           $filter_option = 0;
             $getreviews =  DB::table('HotelReview')->where('HotelId',$id)->orderby('HotelReviewId',$orderby)->where('IsApprove',$filter_option)->get();
         }
-     
+
        // $hotel_id = $gethid[0]->hotelid;
-    
-        
+
+
         return view('hotels.sortHotelReview',['hotelreview'=>$getreviews,'gethid'=>$gethid,'val'=>$filter_option]);
     }
-   
-    public function filterhotelbyid(request $request){ 
-        
+
+    public function filterhotelbyid(request $request){
+
         $val = $request->get('val');
         $getreviews =  DB::table('HotelReview')->where(function($query) use ($val) {
             if (strlen($val) <= 1) {
@@ -627,9 +628,9 @@ if (!empty($addressline1) && !empty($addressline2)) {
             }
         })
         ->limit(3)->get();
-         return view('hotels.sortHotelReview',['hotelreview'=>$getreviews]);  
-        
-    }  
+         return view('hotels.sortHotelReview',['hotelreview'=>$getreviews]);
+
+    }
     public function ftrhotelrewview(request $request){
         $val1 = $request->get('val');
         $id = $request->get('id');
@@ -643,21 +644,21 @@ if (!empty($addressline1) && !empty($addressline2)) {
         } else {
             $getreviews =  DB::table('HotelReview')->where('HotelId',$id)->where('IsApprove',$val1)->get();
         }
-       
-        
-        return view('hotels.sortHotelReview',['hotelreview'=>$getreviews,'val'=>$val1]);  
+
+
+        return view('hotels.sortHotelReview',['hotelreview'=>$getreviews,'val'=>$val1]);
     }
 
       public function update_hotelreview(request $request){
       $id = $request->get('id');
-      
+
       $hotelid = $request->get('hotelid');
       DB::table('HotelReview')->where('HotelReviewId',$id)->update(['IsApprove'=>$request->get('value')]);
-       
+
        $filter_option = $request->get('value');
        $gethid = DB::table('TPHotel')->where('HotelId',$hotelid)->get();
        $getreviews =  DB::table('HotelReview')->where('HotelId',$hotelid)->where('IsApprove',$filter_option)->get();
-       
+
        return view('hotels.sortHotelReview',['hotelreview'=>$getreviews,'gethid'=>$gethid,'val'=>$filter_option]);
     }
 
@@ -670,13 +671,13 @@ if (!empty($addressline1) && !empty($addressline2)) {
             ->select('HotelQuestion.*', 'TPHotel.name')
             ->where('HotelQuestion.HotelId', $id)
             ->get();
-        
+
         // Pass data to edit_hotel.blade
         return view('hotels.edit_hotel', ['getfaq' => $hotelfaq]);
     }
-    
 
-    public function update_hotel_faq(request $request){
+
+    public function update_hotel_faq(Request $request){
 
         $id =  $request->get('faqId');
        // $currentDate = Carbon::today()->toDateString();
@@ -686,12 +687,12 @@ if (!empty($addressline1) && !empty($addressline2)) {
             'IsActive' => 1,
             'CreatedDate' => now(),
         );
-        
+
         return  DB::table('HotelQuestion')->where('hotelQuestionId',$id)->update($data);
 
     }
 
-    public function add_hotel_faq(request $request){
+    public function add_hotel_faq(Request $request){
        $question = $request->get('checkboxText');
        $hotelid = $request->get('hotelid');
        $data = array(
@@ -712,35 +713,35 @@ if (!empty($addressline1) && !empty($addressline2)) {
     /*-------------Hotel Category--------------*/
 
     public function edit_hotel_category($id){
-    
+
         $categoryIds = DB::table('TPHotel')
         ->where('hotelid', $id)
         ->pluck('CategoryId')
         ->toArray();
         $hname = DB::table('TPHotel')
         ->where('hotelid', $id)->get();
-       
-        
+
+
         $hotel_categories = [];
-        
+
         foreach ($categoryIds as $categoryId) {
             $categoryTypes = DB::table('TPHotel_types')
                 ->whereIn('id', explode(',', $categoryId))->get();
-              
-        
+
+
             // foreach ($categoryTypes as $type) {
             //     $hotel_categories[] = ['id' => $type->id, 'name' => $type->type];
             // }
         }
-        
-     
-    
+
+
+
         return view('hotels.edit_hotel_category',['hotel_category'=>$categoryTypes,'hname'=>$hname]);
     }
 
-     public function updateHotelCategory(request $request){
+     public function updateHotelCategory(Request $request){
         $categoryid =  $request->get('id');
-        $hotelid =  $request->get('hotelid');      
+        $hotelid =  $request->get('hotelid');
         $getcat = DB::table('TPHotel')->where('hotelid',$hotelid)->get();
 
         $checkcat = $getcat[0]->CategoryId;
@@ -748,55 +749,55 @@ if (!empty($addressline1) && !empty($addressline2)) {
         $query = DB::table('TPHotel')
         ->where('hotelid', $hotelid)
         ->whereRaw("FIND_IN_SET($categoryid, TRIM(BOTH ',' FROM CategoryId))")
-        ->update([    
+        ->update([
             'CategoryId' => DB::raw("REPLACE(CategoryId, ',$categoryid', '')")
         ]);
 
-           
+
            $categoryIds = DB::table('TPHotel')
            ->where('hotelid', $hotelid)
            ->pluck('CategoryId')
            ->toArray();
            $hname = DB::table('TPHotel')
            ->where('hotelid', $hotelid)->get();
-          
-           
+
+
            $hotel_categories = [];
-           
+
            foreach ($categoryIds as $categoryId) {
                $categoryTypes = DB::table('TPHotel_types')
                    ->whereIn('id', explode(',', $categoryId))->get();
-                 
-           
+
+
                // foreach ($categoryTypes as $type) {
                //     $hotel_categories[] = ['id' => $type->id, 'name' => $type->type];
                // }
            }
-           
-        
-       
+
+
+
            return view('hotels.filterCategory',['hotel_category'=>$categoryTypes,'hname'=>$hname]);
     }
 
     public function search_category(Request $request)
     {
-      
+
         $search = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('TPHotel_types')
             ->where('TPHotel_types.type', 'LIKE', '%' . $search . '%')
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $cat) {
             $result[] = [
                 'id' => $cat->id,
                 'value' => $cat->type,
             ];
         }
-    
+
         return response()->json($result);
     }
 
@@ -805,7 +806,7 @@ if (!empty($addressline1) && !empty($addressline2)) {
 		$cat_type = $request->input('value');
 
 		$getcat = DB::table('TPHotel_types')
-			->where('type', $cat_type)   
+			->where('type', $cat_type)
 			->get();
 	  //return print_r($getcat);
 		$CategoryId = "";
@@ -869,7 +870,7 @@ if (!empty($addressline1) && !empty($addressline2)) {
     }
 
     public function updateLanding(request $request){
-        
+
         $landingid =  $request->get('landing');
         $value =  $request->get('value');
         $colid =  $request->get('colid');
@@ -894,23 +895,23 @@ if (!empty($addressline1) && !empty($addressline2)) {
                 'About' => $request->get('value'),
             );
         }
-       
-        
+
+
         return  DB::table('TPHotel_landing')->where('id',$landingid)->update($data);
 
     }
-    public function hidepage(){
+    public function hidepage(Request $request){
         $landingid =  $request->get('landing');
             $data = array(
                 'status' => 0,
             );
-        
+
         return DB::table('TPHotel_landing')->where('id',$landingid)->update($data);
     }
 
-    public function delete_landing(){
+    public function delete_landing(Request $request){
      $landingid =  $request->get('landing');
-      return  DB::table('table_name')->where('id',$landing)->delete();
+      return  DB::table('TPHotel_landing')->where('id',$landingid)->delete();
 
     }
 
@@ -920,11 +921,11 @@ if (!empty($addressline1) && !empty($addressline2)) {
 
     public function search_hotel(Request $request)
     {
-      
+
         $val = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('TPHotel')
         ->where(function ($query) use ($val) {
             $query->where(
@@ -934,23 +935,23 @@ if (!empty($addressline1) && !empty($addressline2)) {
     })
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $cat) {
             $result[] = [
                 'id' => $cat->hotelid,
                 'value' => $cat->name,
             ];
         }
-    
+
         return response()->json($result);
     }
     public function search_restaurent(Request $request)
     {
-      
+
         $val = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('Restaurant')
         ->where(function ($query) use ($val) {
             $query->where(
@@ -959,23 +960,23 @@ if (!empty($addressline1) && !empty($addressline2)) {
         })
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $cat) {
             $result[] = [
                 'id' => $cat->RestaurantId,
                 'value' => $cat->Title,
             ];
         }
-    
+
         return response()->json($result);
     }
     public function search_neighborhood(Request $request)
     {
-      
+
         $val = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('Neighborhood')
         ->where(function ($query) use ($val) {
             $query->where(
@@ -984,37 +985,37 @@ if (!empty($addressline1) && !empty($addressline2)) {
         })
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $cat) {
             $result[] = [
                 'id' => $cat->NeighborhoodId,
                 'value' => $cat->Name,
             ];
         }
-    
+
         return response()->json($result);
     }
 
 
     public function search_category1(Request $request)
     {
-      
+
         $search = $request->get('val');
 
         $result = array();
-    
+
         $query = DB::table('TPHotel_types')
             ->where('TPHotel_types.type', 'LIKE', '%' . $search . '%')
             ->limit(4)
             ->get();
-    
+
         foreach ($query as $cat) {
             $result[] = [
                 'id' => $cat->id,
                 'value' => $cat->type,
             ];
         }
-    
+
         return response()->json($result);
     }
 
@@ -1030,190 +1031,190 @@ if (!empty($addressline1) && !empty($addressline2)) {
             'Laptop safe', 'Soundproof rooms', 'Lift', 'Family rooms', 'Facilities for disabled guests',
             'Non-smoking rooms', 'Iron',
         ];
-    
+
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hotelAmenities as $amenity) {
             // Convert the amenity to lowercase for case-insensitive comparison
             $amenityLowercase = strtolower($amenity);
-    
+
             // Check if the search term is found in the amenity (case-insensitive search)
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
                     break; // Limit the result to 4, break out of the loop
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
     }
 
-    
+
     public function get_Room_type(Request $request){
         $val = $request->get('val');
         $hotelAmenities = [
-            'Non-Smoking Rooms', 'test', 
+            'Non-Smoking Rooms', 'test',
         ];
-    
+
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hotelAmenities as $amenity) {
             // Convert the amenity to lowercase for case-insensitive comparison
             $amenityLowercase = strtolower($amenity);
-    
+
             // Check if the search term is found in the amenity (case-insensitive search)
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
                     break; // Limit the result to 4, break out of the loop
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
     }
     public function get_hotel_type(Request $request){
         $val = $request->get('val');
         $hoteltype = [
-            'hotel-type 1', 'hotel type 2','test type 3' 
-        ];    
+            'hotel-type 1', 'hotel type 2','test type 3'
+        ];
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hoteltype as $amenity) {
-           
+
             $amenityLowercase = strtolower($amenity);
-    
-         
+
+
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
-                    break; 
+                    break;
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
-    } 
+    }
 
     public function get_onsight_restaurant(Request $request){
         $val = $request->get('val');
         $hoteltype = [
-            'restaurant value 1', 'restaurant value 2','test value 3' 
-        ];    
+            'restaurant value 1', 'restaurant value 2','test value 3'
+        ];
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hoteltype as $amenity) {
-           
+
             $amenityLowercase = strtolower($amenity);
-    
-         
+
+
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
-                    break; 
+                    break;
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
-    } 
+    }
     public function get_hotel_tags(Request $request){
         $val = $request->get('val');
         $hoteltype = [
-            'hotel tag 1', 'hotel tag 2','hotel tag 3' 
-        ];    
+            'hotel tag 1', 'hotel tag 2','hotel tag 3'
+        ];
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hoteltype as $amenity) {
-           
+
             $amenityLowercase = strtolower($amenity);
-    
-         
+
+
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
-                    break; 
+                    break;
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
-    } 
+    }
     public function get_public_transit(Request $request){
         $val = $request->get('val');
         $hoteltype = [
-            'public transit 1', 'public transit 2','text transit 3' 
-        ];    
+            'public transit 1', 'public transit 2','text transit 3'
+        ];
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hoteltype as $amenity) {
-           
+
             $amenityLowercase = strtolower($amenity);
-    
-         
+
+
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
-                    break; 
+                    break;
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
-    } 
+    }
     public function get_access(Request $request){
         $val = $request->get('val');
         $hoteltype = [
-            'access 1', 'access 2','text transit 3' 
-        ];    
+            'access 1', 'access 2','text transit 3'
+        ];
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hoteltype as $amenity) {
-           
+
             $amenityLowercase = strtolower($amenity);
-    
-         
+
+
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
-                    break; 
+                    break;
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
-    } 
-	
-/*	
+    }
+
+/*
 public function spotlightSection()
 {
     // Fetch hotels where spotlight is enabled or not null (depending on your logic)
@@ -1222,7 +1223,7 @@ public function spotlightSection()
         ->where('Spotlights', '!=', '') // Ensure Spotlights column is not an empty string
         ->select('id', 'name', 'Spotlights', 'feature1', 'feature2', 'feature3') // Select relevant columns
         ->get(); // Fetch the results
-	
+
     // Pass the data to the view
     return view('hotels.spotlight', ['spotlightHotels' => $spotlightHotels]);
 }
@@ -1231,20 +1232,20 @@ public function spotlightSection()
 
 
     public function store_landing(request $request){
- 
+
         $name = $request->name;
         $slug = $request->slug;
         $meta_title = $request->meta_title;
         $meta_desc = $request->meta_desc;
-        $about = $request->about; 
-        $hotelId = $request->hotelId;  
+        $about = $request->about;
+        $hotelId = $request->hotelId;
         $nearbytype = $request->nearbytype;
         $nearby = $request->nearby;
 
         // $nearbyid = "";
 
         // if($nearby != ""){
-            
+
         //     if($nearbytype == 'Attraction'){
         //         $sight =  DB::table('Sight')->where('Title',$nearby)->get();
         //         $nearbyid = $sight[0]->SightId;
@@ -1263,7 +1264,7 @@ public function spotlightSection()
 
 
 
-        
+
         $roommntArray = json_encode($request->roommntArray);
         $ratingarray = json_encode($request->ratingarray);
         $hotelmntarray = json_encode($request->hotelmntarray);
@@ -1289,7 +1290,7 @@ public function spotlightSection()
         'MetaTagDescription' => $meta_desc,
         'About' => $about,
         'HotelAmenities' => $hotelmntarray,
-        'Rating' => $ratingarray,  
+        'Rating' => $ratingarray,
         'Room_Amenities' => $roommntArray,
         'Hotel_Pricing' => $HotelPricing_array,
         'Distance' => $distance_array,
@@ -1302,21 +1303,21 @@ public function spotlightSection()
         'Access'=>$Access_value_array,
 
        );
- 
+
        return DB::table('TPHotel_landing')->insert($data);
     }
 
   public function update_landingfilter(request $request){
- 
-        $hotelId = $request->hotelId;  
-        $id = $request->id; 
+
+        $hotelId = $request->hotelId;
+        $id = $request->id;
         $nearbytype = $request->nearbytype;
         $nearby = $request->nearby;
 
         // $nearbyid = "";
 
         // if($nearby != ""){
-            
+
         //     if($nearbytype == 'Attraction'){
         //         $sight =  DB::table('Sight')->where('Title',$nearby)->get();
         //         $nearbyid = $sight[0]->SightId;
@@ -1343,9 +1344,9 @@ public function spotlightSection()
 
             // Now $ratingArray doesn't contain the word "Star"
         }
-       
 
-      
+
+
         $roommntArray = json_encode($request->roommntArray);
         $ratingarray = json_encode($ratingArray);
         $hotelmntarray = json_encode($request->hotelmntarray);
@@ -1362,11 +1363,11 @@ public function spotlightSection()
         $amenities_array = json_encode($request->amenities_array);
 
        $data = array(
-        
+
         'hotel_tags' => $Hotel_Tags_array,
-        'RoomType' => $room_type_array,      
+        'RoomType' => $room_type_array,
         'HotelAmenities' => $hotelmntarray,
-        'Rating' => $ratingarray,  
+        'Rating' => $ratingarray,
         'Room_Amenities' => $roommntArray,
         'Hotel_Pricing' => $HotelPricing_array,
         'Distance' => $distance_array,
@@ -1380,12 +1381,12 @@ public function spotlightSection()
         'Amenities'=>$amenities_array,
 
        );
- 
+
        return DB::table('TPHotel_landing')->where('id',$id)->update($data);
     }
-	
+
 	// FUNCTION FOR SPOTLIGHT
-	
+
 	public function spotlightSection()
 {
     // Fetch hotels where spotlight is enabled or not null (depending on your logic)
@@ -1394,7 +1395,7 @@ public function spotlightSection()
         ->where('Spotlights', '!=', '') // Ensure Spotlights column is not an empty string
         ->select('id', 'name', 'Spotlights', 'feature1', 'feature2', 'feature3') // Select relevant columns
         ->get(); // Fetch the results
-    
+
     // Pass the data to the view
     return view('hotels.spotlight', ['spotlightHotels' => $spotlightHotels]);
 }
@@ -1402,8 +1403,8 @@ public function spotlightSection()
 	//FUNCTION FOR THINGS TO KNOW
 public function showHotelDetails($hotelId) {
     // Fetch hotel details including Things to Know from the TPHotel table
-    $hotel = TPHotel::where('hotelid', $hotelid)->first();
-    
+    $hotel = DB::table('TPHotel')->where('hotelid', $hotelId)->first();
+
     // Assume 'things_to_know' is a field in TPHotel table containing the data
     $ThingstoKnow = $hotel ? explode(',', $hotel->ThingstoKnow) : [];
 
@@ -1423,20 +1424,20 @@ public function showHotelDetails($hotelId) {
                 // $getloc = DB::table('TPLocations')->select('cityName')
                 // ->where('id',$locationid)
                 // ->get();
-    
+
              //   if(!$getloc->isEmpty()){
-                  //  $lname = $getloc[0]->cityName;  
-    
+                  //  $lname = $getloc[0]->cityName;
+
                     //quest 1
                     $att_bestH = DB::table('HotelQuestion')
                     ->where('HotelId', $hotelid)
                     ->where('Question', 'What Attractions are nearby?')
                     ->get();
-                
+
                     if ($att_bestH->isEmpty()) {
-                        $bhv = 1;               
-                     
-                        $searchradius = 50; 
+                        $bhv = 1;
+
+                        $searchradius = 50;
                         $nearby_sight = DB::table("Sight")
                         ->select('SightId', 'Title', 'LocationId', 'Slug',
                             DB::raw("6371 * acos(cos(radians(" . $Latitude . "))
@@ -1445,7 +1446,7 @@ public function showHotelDetails($hotelId) {
                                 + sin(radians(" . $Latitude . "))
                                 * sin(radians(Sight.Latitude))) AS distance"))
                         ->groupBy("Sight.SightId")
-                        ->having('distance', '<=', $searchradius)                      
+                        ->having('distance', '<=', $searchradius)
                         ->orderBy('distance')
                         ->limit(5)
                         ->where('IsMustSee', 1)
@@ -1453,14 +1454,14 @@ public function showHotelDetails($hotelId) {
 
 
                      // return  print_r($nearby_sight);
-                    
+
                         $best_hotel = [];
                         if (!$nearby_sight->isEmpty()) {
                             foreach ($nearby_sight as $bh) {
                                 $best_hotel[] = [
                                     'name' => $bh->Title,
-                                    'url' =>  $bh->LocationId.'-'.$bh->SightId.'-'.$bh->Slug                                 
-                                    
+                                    'url' =>  $bh->LocationId.'-'.$bh->SightId.'-'.$bh->Slug
+
                                 ];
                             }
                         }
@@ -1476,32 +1477,32 @@ public function showHotelDetails($hotelId) {
                            DB::table('HotelQuestion')->insert($bestharray);
                         }
                     }
-    
+
                 //quest 1 end
-    
-           
-    
-    
-               
+
+
+
+
+
                 if($bhv = 1 && $expervar = 1 &&  $cheapestHOt = 1){
-                         
+
                     $faq =  DB::table('HotelQuestion')->where('HotelId',$hotelid)->get();
                     $html3 = view('frontend.hotel.hotel_detail_faq',['faq'=>$faq])->render();
-                 
-           
+
+
                     return response()->json([ 'html' => $html3]);
                 }
-    
-    
+
+
                 //end
-    
+
            //    }
-             
+
         }
-	
-	
-	  //landing amenities 
-    public function amenties(Request $request){ 
+
+
+	  //landing amenities
+    public function amenties(Request $request){
         $val = $request->get('val');
         $hotelAmenities = [
             'TV',
@@ -1594,29 +1595,29 @@ public function showHotelDetails($hotelId) {
                         'Private Bathroom',
                         'Adults only',
         ];
-    
+
         $searchTerm = strtolower($val);
-    
+
         $matchingAmenities = [];
         $count = 0;
         foreach ($hotelAmenities as $amenity) {
             // Convert the amenity to lowercase for case-insensitive comparison
             $amenityLowercase = strtolower($amenity);
-    
+
             // Check if the search term is found in the amenity (case-insensitive search)
             if (strpos($amenityLowercase, $searchTerm) !== false) {
                 $matchingAmenities[] = ['value' => $amenity];
                 $count++;
-    
+
                 if ($count >= 4) {
                     break; // Limit the result to 4, break out of the loop
                 }
             }
         }
-    
+
         return response()->json($matchingAmenities);
     }
-	 
+
     public function storeFaq(Request $request)
 {
     $faqData = [

@@ -56,10 +56,17 @@
         $metaDescription = "";
     @endphp
 
-    @if (!empty($sight_info) && count($sight_info) > 0 || !empty($neighborhood_info) && count($neighborhood_info) > 0 || !empty($amenity_info) && count($amenity_info) > 0)
+       @if (!empty($sight_info) && count($sight_info) > 0 || !empty($neighborhood_info) && count($neighborhood_info) > 0 || !empty($amenity_info) && count($amenity_info) > 0 || !empty($propertyType_info) && count($propertyType_info) > 0)
     @php
-        $metaTitle = "Best Hotels";
-        $metaDescription = "Compare prices for hotels";
+        // Set base title based on property type if available, otherwise use "Hotels"
+        $baseType = "Hotels";
+        if (!empty($propertyType_info) && count($propertyType_info) > 0) {
+            $propertyTypes = collect($propertyType_info)->pluck('type')->implode(', ');
+            $baseType = $propertyTypes;
+        }
+        
+        $metaTitle = "Best " . $baseType;
+        $metaDescription = "Compare prices for " . $baseType;
         
         // Handle combinations for title
         if (!empty($sight_info) && count($sight_info) > 0) {
@@ -556,14 +563,19 @@ jQuery(document).ready(function($) {
         <div class="col-sm-12">
         @if($pagetype=="withoutdate")
           <div class="tr-heading-section">
+@php
+    $hasAmenities = !empty($amenity_ids) && isset($amenity_info) && count($amenity_info) > 0;
+    $hasNeighborhoods = !empty($neighborhood_ids) && isset($neighborhood_info) && count($neighborhood_info) > 0;
+    $hasSights = !empty($sight_info) && isset($sight_info['sight_name']);
+    $hasPropertyTypes = !empty($propertyType_ids) && isset($propertyType_info) && count($propertyType_info) > 0;
+@endphp
             <h1>
               @if($st !="") {{$st}} star @endif
-                  {{$lname}} Hotels 
-@php
-    $hasAmenities = !empty($amenity_ids) && isset($amenity_info);
-    $hasNeighborhoods = !empty($neighborhood_ids) && isset($neighborhood_info);
-    $hasSights = !empty($sight_info);
-@endphp
+              @if($hasPropertyTypes && !$hasNeighborhoods && !$hasSights && !$hasAmenities && $amenity == "")
+                {{ implode(', ', array_map(function($propertyType) { return $propertyType->type; }, $propertyType_info->toArray())) }} in {{$lname}}
+              @else
+                {{$lname}} Hotels
+              @endif
 
 @if(!$getlocationexp->isEmpty())
     @if($pagetype == 'withoutdate' && ($hasAmenities || $hasNeighborhoods || $hasSights))
@@ -1420,15 +1432,20 @@ jQuery(document).ready(function($) {
                   <span class="d-none filter-amenity">{{$amenity}}</span>
                   <span class="d-none filter-rs">{{$reviewscore}}</span>
                   <span class="d-none filter-price">{{$price}}</span>
-                  <h1 class="d-none d-md-block">
-    Showing 
-    @if($st !="") {{$st}} star @endif 
-         {{$lname}} hotels 
 @php
-    $hasAmenities = !empty($amenity_ids) && isset($amenity_info);
-    $hasNeighborhoods = !empty($neighborhood_ids) && isset($neighborhood_info);
-    $hasSights = !empty($sight_hotel_ids) && isset($sight_info);
+    $hasAmenities = !empty($amenity_ids) && isset($amenity_info) && count($amenity_info) > 0;
+    $hasNeighborhoods = !empty($neighborhood_info) && count($neighborhood_info) > 0;
+    $hasSights = !empty($sight_info) && isset($sight_info['sight_name']);
+    $hasPropertyTypes = !empty($propertyType_ids) && isset($propertyType_info) && count($propertyType_info) > 0;
 @endphp
+                <h1 class="d-none d-md-block">
+                Showing 
+    @if($st !="") {{$st}} star @endif 
+    @if($hasPropertyTypes && !$hasNeighborhoods && !$hasSights && !$hasAmenities && $amenity == "")
+        {{ implode(', ', array_map(function($propertyType) { return $propertyType->type; }, $propertyType_info->toArray())) }} in {{$lname}}
+    @else
+        hotels in {{$lname}} 
+    @endif
 
 @if(!$getlocationexp->isEmpty())
     @if($pagetype == 'withoutdate' && ($hasAmenities || $hasNeighborhoods || $hasSights))
@@ -2277,14 +2294,187 @@ jQuery(document).ready(function($) {
 
   </div>
   <!-- Map Modal With Filter & Hotel List - End-->
-	  
-	  
+	                                               
+                                              
 <div class="container">
+                                              
+              <!--City Wise Hotel and Price - START-->
+              @if($pagetype == "withoutdate" && isset($hotelAmenities) && count($hotelAmenities) > 0)
+              <div class="tr-city-wise-hotels-section">
+              <h3>Search for places to stay by destination</h3>
+              <div class="tr-sub-title">Find Accommodation</div>
+              <div class="tr-city-wise-hotel-listing">
+                <!-- First Column -->
+                <div class="tr-city-wise-hotel-lists">
+                  <!-- Hotels with Amenities Section -->
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with Amenities</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($hotelAmenities as $amenity)
+                        @if(isset($amenity['name']) && isset($amenity['url']) && isset($amenity['code']))
+                          <div class="tr-hotel-list">
+                            <div class="tr-hotel-name">
+                              <a href="{{ $amenity['url'] }}" title="Hotels with {{ $amenity['name'] }}" target="_blank" rel="noopener">Hotels with {{ $amenity['name'] }}</a>
+                            </div>
+                          </div>
+                        @endif
+                      @endforeach
+                    </div>
+                  </div>
+                  
+                  <!-- 5-Star Hotels Section -->
+                  @if(isset($fiveStarHotels) && count($fiveStarHotels) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with 5 Stars</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($fiveStarHotels as $hotel)
+                        <div class="tr-hotel-list">
+                          <div class="tr-hotel-name">
+                            <a href="{{ $hotel['url'] }}" title="{{ $hotel['name'] }}" target="_blank" rel="noopener">{{ $hotel['name'] }}</a>
+                          </div>
+                          
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                  
+                  <!-- 4-Star Hotels Section -->
+                  @if(isset($fourStarHotels) && count($fourStarHotels) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with 4 Stars</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($fourStarHotels as $hotel)
+                        <div class="tr-hotel-list">
+                          <div class="tr-hotel-name">
+                            <a href="{{ $hotel['url'] }}" title="{{ $hotel['name'] }}" target="_blank" rel="noopener">{{ $hotel['name'] }}</a>
+                          </div>
+                          
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                </div>
+                
+                <!-- Second Column -->
+                <div class="tr-city-wise-hotel-lists">
+                  <!-- Hotels with Neighborhoods Section -->
+                  @if(isset($hotelNeighborhoods) && count($hotelNeighborhoods) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with Neighborhoods</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($hotelNeighborhoods as $neighborhood)
+                        @if(isset($neighborhood['name']) && isset($neighborhood['url']) && isset($neighborhood['code']))
+                          <div class="tr-hotel-list">
+                            <div class="tr-hotel-name">
+                              <a href="{{ $neighborhood['url'] }}" title="Hotels in {{ $neighborhood['name'] }}" target="_blank" rel="noopener">Hotels in {{ $neighborhood['name'] }}</a>
+                            </div>
+                          </div>
+                        @endif
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                  
+                  <!-- 3-Star Hotels Section -->
+                  @if(isset($threeStarHotels) && count($threeStarHotels) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with 3 Stars</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($threeStarHotels as $hotel)
+                        <div class="tr-hotel-list">
+                          <div class="tr-hotel-name">
+                            <a href="{{ $hotel['url'] }}" title="{{ $hotel['name'] }}" target="_blank" rel="noopener">{{ $hotel['name'] }}</a>
+                          </div>
+                          
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                  
+                  <!-- 2-Star Hotels Section -->
+                  @if(isset($twoStarHotels) && count($twoStarHotels) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with 2 Stars</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($twoStarHotels as $hotel)
+                        <div class="tr-hotel-list">
+                          <div class="tr-hotel-name">
+                            <a href="{{ $hotel['url'] }}" title="{{ $hotel['name'] }}" target="_blank" rel="noopener">{{ $hotel['name'] }}</a>
+                          </div>                        
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                </div>
+                
+                <!-- Third Column -->
+                <div class="tr-city-wise-hotel-lists">
+                  <!-- Popular Sections -->
+                  @if(isset($popularSections) && count($popularSections) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Popular Sections</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($popularSections as $section)
+                        @if(isset($section['name']) && isset($section['url']) && isset($section['code']))
+                          <div class="tr-hotel-list">
+                            <div class="tr-hotel-name">
+                              <a href="{{ $section['url'] }}" title="Hotels in {{ $section['name'] }}" target="_blank" rel="noopener">Hotels in {{ $section['name'] }}</a>
+                            </div>
+                          </div>
+                        @endif
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                  
+                  <!-- 1-Star Hotels Section (Budget Accommodations) -->
+                  @if(isset($oneStarHotels) && count($oneStarHotels) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Budget Accommodations Near You</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($oneStarHotels as $hotel)
+                        <div class="tr-hotel-list">
+                          <div class="tr-hotel-name">
+                            <a href="{{ $hotel['url'] }}" title="{{ $hotel['name'] }}" target="_blank" rel="noopener">{{ $hotel['name'] }}</a>
+                          </div>
+                          
+                        </div>
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                  
+                  <!-- Hotels with Nearby Attractions -->
+                  @if(isset($nearbySights) && count($nearbySights) > 0)
+                  <div class="tr-city-wise-hotel-list">
+                    <div class="tr-city-name">Hotels with Nearby Attractions</div>
+                    <div class="tr-hotel-lists">
+                      @foreach($nearbySights as $sight)
+                        @if(isset($sight['name']) && isset($sight['url']) && isset($sight['code']))
+                          <div class="tr-hotel-list">
+                            <div class="tr-hotel-name">
+                              <a href="{{ $sight['url'] }}" title="Hotels near {{ $sight['name'] }}" target="_blank" rel="noopener">Hotels near {{ $sight['name'] }}</a>
+                            </div>
+                          </div>
+                        @endif
+                      @endforeach
+                    </div>
+                  </div>
+                  @endif
+                </div>
+              </div>
+            </div>
+            @endif                                 
+                                              
     <!--Budget Hotels - START-->
     @if(!$neabyhotelwithswimingpool->isEmpty())
           <div class="tr-more-places tr-budget-hotels-near-you responsive-container">
               <div class="tr-heading-with-see-all">
-                <h3>Budget Hotels near you</h3>				
+                <h3>Budget Hotels near {{ $location_info->Name }}</h3>		
                 <a href="javascript:void(0);" class="tr-see-all">See All</a>
               </div>
               <h6>Hotels with Swimming pool</h6>
@@ -2337,9 +2527,8 @@ jQuery(document).ready(function($) {
               </div>
           </div>
           @endif   
-            <!--Budget Hotels - END-->
-  
-    <!-- breadcrums -->
+            <!--Budget Hotels - END-->                                   
+                                              
  @if(isset($location_info) && $location_info)
     <div class="row">
         <div class="col-sm-12">
@@ -2355,8 +2544,119 @@ jQuery(document).ready(function($) {
             </div>
         </div>
     </div>
-@endif
+@endif                                      
+                      
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="tr-single-page">
+                <div class="tr-terms-and-conditions-section">
+                    <h3 style="font-weight: bold; margin-bottom: 20px; font-size: 24px;">{{ $location_info->Name }} Hotel Pricing Guide</h3>
+                    <p style="margin-top: 20px; margin-bottom: 20px;"> The average hotel cost in {{ $location_info->Name }} is ${{ $pricingStats['averageNightlyRate']['min'] }}-${{ $pricingStats['averageNightlyRate']['max'] }} per night across all categories, with significant variation by star rating, location, and season. Budget travelers can find quality options starting from ${{ number_format($pricingStats['priceRange']['min']) }}, while luxury experiences reach ${{ number_format($pricingStats['priceRange']['max']) }}+ per night.</p>
 
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Key Market Statistics:</h4>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Total Hotels Available: Over {{ number_format($pricingStats['totalHotels']) }} hotel operators citywide</li>
+                        <li>Average Nightly Rate: ${{ $pricingStats['averageNightlyRate']['min'] }}-${{ $pricingStats['averageNightlyRate']['max'] }} (varies by source and methodology)</li>
+                        <li>Price Range: ${{ $pricingStats['priceRange']['min'] }}-${{ number_format($pricingStats['priceRange']['max']) }}+ per night depending on category and season</li>
+                    </ul>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Hotel Pricing by Star Rating</h4>
+                    <p style="margin-top: 10px; margin-bottom: 15px;">Our comprehensive analysis of 70+ booking partners reveals distinct pricing tiers:</p>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">5-Star Luxury Hotels</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Average Rate: ${{ $pricingStats['byStarRating'][5]['averageRate']['min'] }}-${{ $pricingStats['byStarRating'][5]['averageRate']['max'] }} per night</li>
+                        <li>Peak Season: Can exceed $1,000/night</li>
+                        @if(!empty($popularNeighborhoods))
+                        <li>Popular Areas: {{ $popularNeighborhoods }}</li>
+                        @endif
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">4-Star Premium Hotels</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Average Rate: ${{ $pricingStats['byStarRating'][4]['averageRate']['min'] }}-${{ $pricingStats['byStarRating'][4]['averageRate']['max'] }} per night</li>
+                        <li>Notable Options: Include major chains like Hilton, Sheraton, InterContinental</li>
+                        <li>Value Proposition: High-end amenities without luxury pricing</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">3-Star Mid-Range Hotels</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Average Rate: ${{ $pricingStats['byStarRating'][3]['averageRate']['min'] }}-${{ $pricingStats['byStarRating'][3]['averageRate']['max'] }} per night</li>
+                        <li>Sweet Spot: Best balance of comfort and value</li>
+                        <li>Range: $153-$333 per night depending on location</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">2-Star Budget Hotels</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Average Rate: ${{ $pricingStats['byStarRating'][2]['averageRate']['min'] }}-${{ $pricingStats['byStarRating'][2]['averageRate']['max'] }} per night</li>           
+                        <li>Best Value: Significant savings while maintaining essential amenities</li>
+                        <li>Popular Choices: Extended Stay, Holiday Inn Express, local motels</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">1-Star/Hostel Accommodations</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Average Rate: ${{ $pricingStats['byStarRating'][1]['averageRate']['min'] }}-${{ $pricingStats['byStarRating'][1]['averageRate']['max'] }} per night</li>
+                        <li>Budget Champion: Perfect for backpackers and extended stays</li>
+                    </ul>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Weekly Rate Patterns</h4>
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Weekday Advantages:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Sunday: Cheapest night of the week</li>
+                        <li>Monday-Thursday: Consistent lower rates</li>
+                        <li>Business Travel: Less competition for rooms</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Weekend Premiums:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Friday-Saturday: 25-50% rate increases</li>
+                        <li>Event Weekends: Can see 100%+ premiums</li>
+                        <li>Booking Strategy: Consider Sunday-Thursday stays</li>
+                    </ul>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Money-Saving Strategies</h4>
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Booking Optimization:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Advance Booking: Weekday rates and shoulder seasons offer best value</li>
+                        <li>Promotional Codes: Leverage seasonal discounts and limited-time offers</li>
+                        <li>Group Bookings: Extended stays often include additional perks</li>
+                        <li>Direct Contact: Hotels may offer unpublished rates when contacted directly</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Location Strategy:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Transit Access: Choose neighborhoods with excellent public transport</li>
+                        <li>Distance Trade-off: Save 30-50% by staying 15-20 minutes from main attractions</li>
+                        <li>Emerging Areas: Consider up-and-coming neighborhoods for value</li>
+                    </ul>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Additional Considerations</h4>
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Amenity-Based Pricing:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Pool Hotels: Premium during summer months</li>
+                        <li>Parking Included: Valuable in high-traffic areas</li>
+                        <li>Airport Shuttle: Convenient for LAX travelers</li>
+                        <li>Pet-Friendly: Limited options command premiums</li>
+                    </ul>
+
+                    <h5 style="font-weight: bold; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">Market Trends for 2025:</h5>
+                    <ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 20px;">
+                        <li>Eco-Friendly Practices: LEED-certified properties gaining popularity</li>
+                        <li>Smart Technology: Enhanced room automation and personalized services</li>
+                        <li>Experience Focus: Hotels offering curated local experiences</li>
+                        <li>Flexible Cancellation: Increasingly important post-pandemic feature</li>
+                    </ul>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Conclusion</h4>
+                    <p style="margin-top: 10px; margin-bottom: 15px;">{{ $location_info->Name }} offers exceptional hotel diversity across all price points, from ${{ $pricingStats['priceRange']['min'] }} budget motels to ${{ $pricingStats['priceRange']['max'] }}+ luxury resorts. Smart travelers can find quality accommodations by being flexible with location, timing, and amenities. Whether seeking Hollywood glamour, beachfront relaxation, or urban exploration, LA's hotel market provides options for every traveler and budget.</p>
+
+                    <h4 style="font-weight: bold; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Pro Tip:</h4>
+                    <p style="margin-top: 10px; margin-bottom: 15px;">Book Tuesday-Thursday stays in shoulder seasons for optimal value, and consider neighborhoods like Koreatown or East Hollywood for authentic LA experiences at budget-friendly rates.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+                                              
    <div class="tr-breadcrumb-section">
       <ul class="tr-breadcrumb">
         <li><a href="https://www.travell.co">Travell</a></li>                    
@@ -2844,6 +3144,8 @@ document.addEventListener('DOMContentLoaded', function() {
   window.amenityIds = {!! json_encode(!empty($amenity_ids) ? $amenity_ids : []) !!};
   window.neighborhood_info = {!! json_encode(!empty($neighborhood_info) ? $neighborhood_info : []) !!};
   window.sight_info = {!! json_encode(!empty($sight_info) ? $sight_info : []) !!};
+  window.propertyType_ids = {!! json_encode(!empty($propertyType_ids) ? $propertyType_ids : []) !!};
+  window.propertyTypeInfo = {!! json_encode(!empty($propertyType_info) ? $propertyType_info : []) !!};
 </script>
 <style>
 .filter-count {

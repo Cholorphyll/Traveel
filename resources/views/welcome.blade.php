@@ -70,7 +70,7 @@
   	"logo": "https://www.travell.co/images/logo.png",
   	"slogan": "Plan less. Discover more",
   	"description": "Discover authentic travel experiences with Travell. Compare prices, find hidden gems, and explore local favorites across top destinations worldwide. Plan your next adventure with insider insights and make every trip unforgettable.",
-  	"foundingDate": "2022",
+  	"foundingDate": "2025",
   	"founders": [
     	{
       	"@type": "Person",
@@ -92,7 +92,7 @@
   	"https://www.linkedin.com/company/mytravell",
 	"https://www.f6s.com/company/travell.co",
 	"https://twitter.com/wwwTravellco",
-	"https://www.crunchbase.com/organization/tripalong"
+	"https://www.crunchbase.com/organization/travell"
   	],
   	"knowsAbout": [
     	"Hotel price comparison",

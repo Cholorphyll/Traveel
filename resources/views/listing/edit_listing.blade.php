@@ -197,11 +197,12 @@
                    
                       <div class="form-group mt-3">
                       <span class="badge bg-dark edit-btn fa-pull-right mt-3" id="edit-btn" value="0"
-              onclick="editLocation(5)" >Edit</span>
+              onclick="editLocation(5)">Edit</span>
                         <strong>About Location</strong>
-                        <textarea type="text" name='about' class="form-control rounded-3 name5" data-orgdata="{{$listing[0]->About}}"
-                        disabled >{{$listing[0]->About}}</textarea>
+                        <textarea id="about_location" name='about' class="form-control rounded-3 name5" data-orgdata="{!! htmlspecialchars($listing[0]->About) !!}"
+                        disabled>{!! $listing[0]->About !!}</textarea>
                       </div>
+                      <input type="hidden" id="about_location_content" name="about_location_content" value="{!! htmlspecialchars($listing[0]->About) !!}">
                       <span id="buttonsContainer-5"
                         class="buttons-container-dd d-none mb-3 " >
                         <button type="button" value="1"
@@ -219,8 +220,8 @@
                       <span class="badge bg-dark edit-btn fa-pull-right mt-3" id="edit-btn" value="0"
               onclick="editLocation(6)">Edit</span>
                         <strong>Pincode</strong>
-                        <input type="number" name='pincode' class="form-control rounded-3 name6 pincode" data-orgdata="{{$listing[0]->UploadLocation}}"
-                          placeholder="Pincode" value="{{$listing[0]->UploadLocation}}"  disabled>
+                        <input type="number" name='pincode' class="form-control rounded-3 name6 pincode" data-orgdata="{{$listing[0]->UploadLocation ?? ''}}"
+                          placeholder="Pincode" value="{{$listing[0]->UploadLocation ?? ''}}"  disabled>
                       </div>
 
                       <span id="buttonsContainer-6"
@@ -248,4 +249,133 @@
     </div>
   </div>
 
-</x-app-layout>
+  @push('scripts')
+  <script>
+    // Initialize CKEditor
+    CKEDITOR.replace('about_location', {
+      height: 300,
+      toolbar: [
+        { name: 'document', items: ['Source', '-', 'Save', 'NewPage', 'Preview', 'Print', '-', 'Templates'] },
+        { name: 'clipboard', items: ['Cut', 'Copy', 'Paste', 'PasteText', 'PasteFromWord', '-', 'Undo', 'Redo'] },
+        { name: 'editing', items: ['Find', 'Replace', '-', 'SelectAll', '-', 'Scayt'] },
+        { name: 'forms', items: ['Form', 'Checkbox', 'Radio', 'TextField', 'Textarea', 'Select', 'Button', 'ImageButton', 'HiddenField'] },
+        '/',
+        { name: 'basicstyles', items: ['Bold', 'Italic', 'Underline', 'Strike', 'Subscript', 'Superscript', '-', 'CopyFormatting', 'RemoveFormat'] },
+        { name: 'paragraph', items: ['NumberedList', 'BulletedList', '-', 'Outdent', 'Indent', '-', 'Blockquote', 'CreateDiv', '-', 'JustifyLeft', 'JustifyCenter', 'JustifyRight', 'JustifyBlock', '-', 'BidiLtr', 'BidiRtl'] },
+        { name: 'links', items: ['Link', 'Unlink', 'Anchor'] },
+        { name: 'insert', items: ['Image', 'Flash', 'Table', 'HorizontalRule', 'Smiley', 'SpecialChar', 'PageBreak', 'Iframe'] },
+        '/',
+        { name: 'styles', items: ['Styles', 'Format', 'Font', 'FontSize'] },
+        { name: 'colors', items: ['TextColor', 'BGColor'] },
+        { name: 'tools', items: ['Maximize', 'ShowBlocks'] },
+        { name: 'about', items: ['About'] }
+      ]
+    });
+
+    // Update hidden field before form submission
+    CKEDITOR.instances.about_location.on('change', function() {
+      $('#about_location_content').val(CKEDITOR.instances.about_location.getData());
+    });
+
+    // Handle the edit button click for the About section
+    function editLocation(sectionId) {
+      if (sectionId === 5) { // About Location section
+        const aboutField = $('.name5');
+        const isDisabled = aboutField.prop('disabled');
+        
+      if (isDisabled) {
+        // Enable editing
+        aboutField.prop('disabled', false);
+        $('#buttonsContainer-' + sectionId).removeClass('d-none');
+        
+        // Make sure CKEditor is enabled
+        if (CKEDITOR.instances.about_location) {
+          CKEDITOR.instances.about_status = 'enabled';
+        }
+      }
+    } else {
+      // Handle other sections
+      const field = $('.name' + sectionId);
+      const isDisabled = field.prop('disabled');
+      
+      if (isDisabled) {
+        field.prop('disabled', false);
+        $('#buttonsContainer-' + sectionId).removeClass('d-none');
+      }
+    }
+  }
+
+  // Update the updateLocation function to handle CKEditor content
+  $(document).on('click', '.updateLocation', function() {
+    const locationId = $(this).data('id');
+    const columnId = $(this).data('colid');
+    let value = '';
+    
+    // Handle CKEditor content
+    if (columnId == 5 && CKEDITOR.instances.about_location) {
+      value = CKEDITOR.instances.about_location.getData();
+      $('#about_location_content').val(value);
+    } else {
+      value = $('.name' + columnId).val();
+    }
+    
+    // Rest of your AJAX call
+    $.ajax({
+      url: '{{ route("update_location_content") }}',
+      type: 'POST',
+      data: {
+        _token: '{{ csrf_token() }}',
+        id: locationId,
+        column: columnId,
+        value: value
+      },
+      success: function(response) {
+        if (response.success) {
+          $('#Success').html('<div class="alert alert-success">' + response.message + '</div>');
+          $('.name' + columnId).prop('disabled', true);
+          $('#buttonsContainer-' + columnId).addClass('d-none');
+          
+          // If this was the About section, update the original data
+          if (columnId == 5) {
+            $('.name5').data('orgdata', value);
+          }
+          
+          // Hide success message after 3 seconds
+          setTimeout(function() {
+            $('#Success').html('');
+          }, 3000);
+        }
+      },
+      error: function(xhr) {
+        alert('Error updating location: ' + xhr.responseText);
+      }
+    });
+  });
+
+  // Handle cancel button
+  function cancelLoc(sectionId) {
+    const field = $('.name' + sectionId);
+    field.prop('disabled', true);
+    
+    // For CKEditor, revert to original content
+    if (sectionId == 5 && CKEDITOR.instances.about_location) {
+      const originalContent = field.data('orgdata');
+      CKEDITOR.instances.about_location.setData(originalContent);
+      $('#about_location_content').val(originalContent);
+    } else {
+      field.val(field.data('orgdata'));
+    }
+    
+    $('#buttonsContainer-' + sectionId).addClass('d-none');
+  }
+  
+  // Initialize CKEditor with the original content when the page loads
+  $(document).ready(function() {
+    if (CKEDITOR.instances.about_location) {
+      const originalContent = $('.name5').data('orgdata');
+      CKEDITOR.instances.about_location.setData(originalContent);
+    }
+  });
+  </script>
+  @endpush
+  </x-app-layout>

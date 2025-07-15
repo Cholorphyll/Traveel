@@ -49,7 +49,7 @@ class AttractionController extends Controller
         return view('attraction.add_sight',['country'=>$country,]);
     }
     
-  public function search_city(Request $request)
+    public function search_city(Request $request)
     {
 
         $search = $request->get('val');
@@ -728,84 +728,121 @@ class AttractionController extends Controller
         
     }
 
-    Public function store_sight_faq(request $request){
+  public function store_sight_faq(request $request){
+        // Validate the request data
         $request->validate([
             'sightname' => 'required',
-            'question' => 'required',
+            'faquestion' => 'required',
             'answer' => 'required',
         ]);
-        $sightid ="";
+        
+        $sightid = "";
       
-            $ctname =  $request->get('sightname');
-            $getsight =  DB::table('Sight')->where('Title',$ctname)->get();
+        // Get the sight name from the request
+        $ctname = $request->get('sightname');
+        $getsight = DB::table('Sight')->where('Title', $ctname)->get();
            
-            if($getsight->isEmpty()){
-                return redirect()->route('add_sight_faq')->with('error','Sight not found. Please try again.');
-            }else{
-
-                $sightid =  $getsight[0]->SightId;
-            }
+        if($getsight->isEmpty()){
+            return redirect()->route('add_sight_faq')->with('error','Sight not found. Please try again.');
+        } else {
+            $sightid = $getsight[0]->SightId;
+        }
      
-        $currentDate = Carbon::today()->toDateString();
+        // Get the current date
+        $currentOn = Carbon::today()->toDateString();
+        
+        // Get the answer directly from the request input
+        $answer = $request->input('answer');
+        
+        // Check if answer is empty and provide a default
+        if(empty($answer)) {
+            $answer = $request->input('Answer'); // Try with capital A as fallback
+        }
+        
+        // Prepare data for insertion
         $data = array(
             'SightId' => $sightid,
-            'Question' => $request->get('question'),
-            'Answer' => $request->get('answer'),
-            'IsActive' => 1,
-            'CreatedDate' => $currentDate,
+            'Faquestion' => $request->input('faquestion'),
+            'Answer' => $answer,
+            'CreatedOn' => $currentOn,
         );
         
-        DB::table('SightQuestion')->insert($data);
+        // Insert data into the database
+        DB::table('SightListingDetailFaq')->insert($data);
 
-        return redirect()->route('search_attraction')->with('success','Faq added Successfully.');
+        return redirect()->route('search_attraction')->with('success','FAQ added successfully.');
     }
    
     public function edit_attfaq($id){
         
-        $getfaq = DB::table('SightQuestion')->leftJoin('Sight','Sight.SightId','=','SightQuestion.SightId')
-        ->select('SightQuestion.*','Sight.Title')
-        ->where('SightQuestion.SightId',$id)->get();
+        $getfaq = DB::table('SightListingDetailFaq')->leftJoin('Sight','Sight.SightId','=','SightListingDetailFaq.SightId')
+        ->select('SightListingDetailFaq.*','Sight.Title')
+        ->where('SightListingDetailFaq.SightId',$id)->get();
         
         return view('attraction.edit_sight_faq',['getfaq'=>$getfaq]);
     }
     public function update_faq(request $request){
-        $id =  $request->get('faqId');
-        $answer = $request->get('answer');
+    
+        $id = $request->get('faqId');
+        $faquestion = $request->get('faquestion');
+        $answer = $request->get('answer') ?? ''; // default empty string if null
 
-        if($answer == ""){
-            $answer =" ";
-        }
+        // Basic validation
+        $request->validate([
+            'faqId' => 'required|integer',
+            'faquestion' => 'required|string|max:1000',
+            'answer' => 'nullable|string|max:5000',
+        ]);
 
-
-        $currentDate = Carbon::today()->toDateString();
-        $data = array(
-            'Question' => $request->get('question'),
+        // Prepare data
+        $data = [
+            'Faquestion' => $faquestion,
             'Answer' => $answer,
-            'IsActive' => 1,
-            'CreatedDate' => now(),
-        );
+            'UpdatedOn' => Carbon::now(),
+        ];
         
-        return  DB::table('SightQuestion')->where('SightQuestionId',$id)->update($data);
+        // Debug the query
+        \Log::info('Updating FAQ with ID: ' . $id);
+        
+        // Perform update using Id field
+        $updated = DB::table('SightListingDetailFaq')
+            ->where('Id', $id)
+            ->update($data);
 
- 
+        // Return JSON response for AJAX requests
+        if ($request->ajax()) {
+            if ($updated) {
+                return response()->json(['success' => true, 'message' => 'FAQ updated successfully.']);
+            } else {
+                return response()->json(['success' => false, 'message' => 'No changes were made or FAQ not found.']);
+            }
+        }
+        
+        // Return redirect response for non-AJAX requests
+        if ($updated) {
+            return redirect()->back()->with('success', 'FAQ updated successfully.');
+        } else {
+            return redirect()->back()->with('error', 'No changes were made or FAQ not found.');
+        }
     }
 	   public function add_sight_faq(request $request){
-            $question = $request->get('checkboxText');
+       
+            $faquestion = $request->get('checkboxText');
             $sightid = $request->get('sightid');
             $data = array(
-                    'Question'=>$question,
+                    'Faquestion'=>$faquestion,
                     'SightId'=>$sightid,
-                    'IsActive' => 1,
-                    'CreatedDate' => now(),
+                    // 'OrderFaq' => 1,
+                    'CreatedOn' => now(),
                     'Answer'=>''
             );
-            DB::table('SightQuestion')->insert($data);
+            DB::table('SightListingDetailFaq')->insert($data);
 
            
-            $hotelfaq = DB::table('SightQuestion')
-            ->Leftjoin('Sight','SightQuestion.SightId', '=' ,'Sight.SightId')
-            ->select('SightQuestion.*','Sight.Title')
-            ->where('SightQuestion.SightId',$sightid)->get();
+            $hotelfaq = DB::table('SightListingDetailFaq')
+            ->Leftjoin('Sight','SightListingDetailFaq.SightId', '=' ,'Sight.SightId')
+            ->select('SightListingDetailFaq.*','Sight.Title')
+            ->where('SightListingDetailFaq.SightId',$sightid)->get();
 
             return view('attraction.updated_faq',['getfaq'=>$hotelfaq]);
         }

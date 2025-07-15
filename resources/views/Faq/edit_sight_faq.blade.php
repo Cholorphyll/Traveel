@@ -49,7 +49,7 @@
                       {{ $message }}
                     </div>
                     @endif
-                    <br> 
+                    <br>
                     <!-- Button trigger modal -->
                     <span type="button" class="float-right" data-bs-toggle="modal" data-bs-target="#staticBackdrop"
                       style="float:right">
@@ -74,38 +74,37 @@
                           <input type="hidden" name='attrid' id="selected_att_id" value="{{ $getfaq[0]->SightId }}"
                             class="form-control rounded-3" required>
 
-                          @foreach($getfaq as $getfaq)
+                          @foreach($getfaq as $faqItem)
 
-                          <div class="form-group getdata-{{ $getfaq->SightQuestionId }} mt-3">
-                            <span class="badge bg-dark edit-btn fa-pull-right mt-3" id="edit-btn" value="0"
-                              onclick="editsightfaq({{ $getfaq->SightQuestionId }})">Edit</span>
-                            <strong>Question</strong>
-                            <div id="questionmsg-{{ $getfaq->SightQuestionId }}"></div>
-                            <textarea type="text" name="question" data-original-value="{{ $getfaq->Question }}"
-                              id="question{{ $getfaq->SightQuestionId }}" class="form-control rounded-3"
-                              disabled>{{ $getfaq->Question }}</textarea>
+                          <div class="form-group getdata-{{ $faqItem->Id }} mt-3">
+                            <span class="badge bg-dark edit-btn fa-pull-right mt-3" value="0"
+                              onclick="editsightfaq({{ $faqItem->Id }})">Edit</span>
+                            <strong>Faquestion</strong>
+                            <div id="faquestionmsg-{{ $faqItem->Id }}"></div>
+                            <textarea type="text" name="faquestion" data-original-value="{{ $faqItem->Faquestion }}"
+                              id="faquestion{{ $faqItem->Id }}" class="form-control rounded-3"
+                              disabled>{{ $faqItem->Faquestion }}</textarea>
                           </div>
 
                           <div class="form-group">
                             <strong>Answer</strong>
-                            <div id="answer-{{ $getfaq->SightQuestionId }}"></div>
-                            <textarea type="text" name="answer" data-original-value="{{ $getfaq->Answer }}"
-                              id="Answer{{ $getfaq->SightQuestionId }}" class="form-control rounded-3" placeholder=""
-                              disabled>{{ $getfaq->Answer }}</textarea>
+                            <textarea type="text" name="answer" data-original-value="{{ $faqItem->Answer }}"
+                              id="answer{{ $faqItem->Id }}" class="form-control rounded-3" placeholder="Enter answer here"
+                              disabled>{{ $faqItem->Answer }}</textarea>
+                            <input type="hidden" id="faqId{{ $faqItem->Id }}" value="{{ $faqItem->Id }}">
+                            <input type="hidden" id="sightId{{ $faqItem->Id }}" value="{{ $faqItem->SightId }}">
                           </div>
 
-                          <span id="buttonsContainer-{{ $getfaq->SightQuestionId }}"
-                            class="buttons-container-dd d-none mb-3 " data-colid="{{ $getfaq->SightQuestionId }}">
+                          <span id="buttonsContainer-{{ $faqItem->Id }}"
+                            class="buttons-container-dd d-none mb-3 " data-colid="{{ $faqItem->Id }}">
                             <button type="button" value="1"
                               class="reviewField- btn btn-dark save-button px-4 updatesightfaq"
-                              data-id="{{ $getfaq->SightQuestionId }}">Save</button>
-                            <button type="button" value="2" id="cancel-1"
-                              onclick="cancelbtn({{ $getfaq->SightQuestionId }})"
-                              class=" btn btn-dark cancel-button px-4">Cancel</button>
+                              data-id="{{ $faqItem->Id }}">Save</button>
+                            <button type="button" value="2"
+                              onclick="cancelbtn({{ $faqItem->Id }})"
+                              class="btn btn-dark cancel-button px-4">Cancel</button>
                           </span>
-
                           @endforeach
-
                         </div>
                       </div>
                     </div>
@@ -169,13 +168,13 @@
 
                               <hr>
                               <p id="errorcustfaq"></p>
-                              <label for="">Question</label>
-                              <textarea type="text" name="question" id="addques"
+                              <label for="">Faquestion</label>
+                              <textarea type="text" name="Faquestion" id="addques"
                                 class="form-control rounded-3"></textarea>
-                              <!-- <label for="">Answer</label>
-                              <textarea type="text" name="Answer" 
+                               <label for="">Answer</label>
+                              <textarea type="text" name="answer" 
                               data-id="" id="addans" class="form-control rounded-3"
-                              ></textarea> -->
+                              ></textarea> 
                               <br>
                               <br>
                               <span class="mt-3  custom-faq-buttons">
@@ -205,5 +204,93 @@
               </div>
             </div>
           </div>
+
+@push('scripts')
+<script>
+  // Function to enable editing of FAQ
+  function editsightfaq(id) {
+    // Enable the form fields for editing
+    $('#faquestion' + id).prop('disabled', false);
+    $('#answer' + id).prop('disabled', false);
+    
+    // Show the buttons container
+    $('#buttonsContainer-' + id).removeClass('d-none');
+  }
+  
+  // Function to cancel editing
+  function cancelbtn(id) {
+    // Disable the form fields
+    $('#faquestion' + id).prop('disabled', true);
+    $('#answer' + id).prop('disabled', true);
+    
+    // Hide the buttons container
+    $('#buttonsContainer-' + id).addClass('d-none');
+    
+    // Restore original values
+    $('#faquestion' + id).val($('#faquestion' + id).attr('data-original-value'));
+    $('#answer' + id).val($('#answer' + id).attr('data-original-value'));
+  }
+  
+  // Handle the save button click for updating FAQ
+  $(document).on('click', '.updatesightfaq', function() {
+    var faqId = $(this).data('id'); // This is now the actual FAQ ID
+    var sightId = $('#sightId' + faqId).val(); // Get the sight ID from the hidden field
+    var faquestion = $('#faquestion' + faqId).val();
+    var answer = $('#answer' + faqId).val() || ''; // Ensure answer is at least an empty string
+    
+    console.log('Updating FAQ with ID:', faqId);
+    console.log('SightId:', sightId);
+    console.log('Question:', faquestion);
+    console.log('Answer:', answer);
+    console.log('Answer element exists:', $('#answer' + faqId).length > 0);
+    
+    // Perform AJAX request to update the FAQ
+    $.ajax({
+      url: '{{ route("update_faq") }}',
+      type: 'POST',
+      data: {
+        _token: '{{ csrf_token() }}',
+        faqId: faqId,
+        faquestion: faquestion,
+        answer: answer
+      },
+      success: function(response) {
+        if (response.success) {
+          // Update the original values - using faqId instead of sightId
+          $('#faquestion' + faqId).attr('data-original-value', faquestion);
+          $('#answer' + faqId).attr('data-original-value', answer);
+          
+          // Show success message
+          $('#Success').html('<div class="alert alert-success">' + response.message + '</div>');
+          
+          // Reset the form - using faqId instead of sightId
+          cancelbtn(faqId);
+          
+          // Hide success message after 3 seconds
+          setTimeout(function() {
+            $('#Success').html('');
+          }, 3000);
+        } else {
+          // Show error message
+          $('#Success').html('<div class="alert alert-danger">' + (response.message || 'Failed to update FAQ!') + '</div>');
+        }
+      },
+      error: function(xhr, status, error) {
+        // Check if there are validation errors
+        if (xhr.responseJSON && xhr.responseJSON.errors) {
+          var errorMessages = '';
+          $.each(xhr.responseJSON.errors, function(key, value) {
+            errorMessages += value[0] + '<br>';
+          });
+          $('#Success').html('<div class="alert alert-danger">' + errorMessages + '</div>');
+        } else {
+          // Show general error message
+          $('#Success').html('<div class="alert alert-danger">An error occurred while updating FAQ!</div>');
+        }
+      }
+    });
+  });
+</script>
+@endpush
 
 </x-app-layout>

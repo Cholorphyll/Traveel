@@ -19,13 +19,14 @@
                    <td>{{ $value->SightId }}</td>
                    <td>{{ $value->Title }}</td>
                    <td>
-					     <a href="{{ route('att_detail',[$value->LocationId.'-'.$value->SightId.'-'.$value->Slug])}}" target="_blank" class="ml-3 margin-l"><i class="fas fa-edit"></i>short - Edit Attraction</a>
-					   <a href="{{ route('edit_attraction',[$value->SightId])}}" target="_blank" class="ml-3 margin-l"><i class="fas fa-edit"></i> Edit Attraction</a>
-					 <a href="{{ route('edit_attfaq',[$value->SightId])}}" target="_blank" class=" ml-3 margin-l"> <i class="fas fa-edit"></i>Edit FAQ</a>
-                <a href="{{ route('edit_category',[$value->SightId])}}" target="_blank" class="ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Category</a>
-                   <a href="{{ route('edit_reviewbyid',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit review</a> 
-                   <a href="{{ route('edit_landing',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit landing Page</a>
-                  <a href="{{ route('edit_sight_img',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Images</a>
+                      <a href="{{ route('att_detail',[$value->LocationId.'-'.$value->SightId.'-'.$value->Slug])}}" target="_blank" class="ml-3 margin-l"><i class="fas fa-edit"></i>short - Edit Attraction</a>
+                      <a href="{{ route('edit_attraction',[$value->SightId])}}" target="_blank" class="ml-3 margin-l"><i class="fas fa-edit"></i> Edit Attraction</a>
+                      <a href="{{ route('edit_attfaq',[$value->SightId])}}" target="_blank" class=" ml-3 margin-l"> <i class="fas fa-edit"></i>Edit FAQ</a>
+                      <a href="{{ route('edit_category',[$value->SightId])}}" target="_blank" class="ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Category</a>
+                      <a href="{{ route('edit_reviewbyid',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit review</a> 
+                      <a href="{{ route('edit_landing',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit landing Page</a>
+                      <a href="{{ route('edit_sight_img',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Images</a>
+                      <a href="{{ route('qa_attraction', $value->SightId)}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-question-circle"></i> Question & Answer</a>
                   </td>
                    
                  </tr>

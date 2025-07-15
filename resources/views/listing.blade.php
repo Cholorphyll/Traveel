@@ -677,17 +677,17 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                 @endforeach
             </div>
             @endif
-<div id="loading" class="tr-page-loader" style="display: none;"> 
-    <div class="tr-loader-container">
-        <div class="tr-spinner"></div>
-        <p>Finding the best attractions...</p>
-    </div>
-</div>
-<button type="button" class="tr-btn tr-load-more">Load More</button>
+			<div id="loading" class="tr-page-loader" style="display: none;"> 
+   			 <div class="tr-loader-container">
+       	 			<div class="tr-spinner"></div>
+       	 			<p>Finding the best attractions...</p>
+    		</div>
+			</div>
+			<button type="button" class="tr-btn tr-load-more">Load More</button>
                             
-</div>
+			</div>
                             
-<div class="tr-map-and-filter">
+		<div class="tr-map-and-filter">
             <button type="button" class="tr-explore-map-btn map"><svg width="14" height="14" viewBox="0 0 14 14"
                 fill="none" xmlns="http://www.w3.org/2000/svg">
                 <g clip-path="url(#clip0_2464_12970)">
@@ -725,7 +725,205 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
       </div>
     </div>
   </div>
+	
+                    
+   <!--Quick Portrait-->
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="tr-single-page">
+                <div class="tr-terms-and-conditions-section">
+                    <h3 style="font-weight: bold; margin-bottom: 20px; font-size: 24px;">
 
+                    </h3>
+                    <p style="margin-top: 20px;">
+
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        <div class="row">
+            <div class="tr-single-page">
+                    <h2 class="section-title mb-16 font-bold">{{ $cityName ?? ($locn ?? 'City') }}: Quick Portrait
+                    </h2>
+                    <div class="about-section mb-32">
+                    @php
+                        $currentCity = $cityName ?? ($locn ?? 'City');
+                        $aboutContent = null;
+                        
+                        // Check if location exists and extract About content
+                        if (isset($location) && !empty($location)) {
+                            if (is_object($location)) {
+                                $aboutContent = isset($location->About) && !empty($location->About) ? $location->About : null;
+                            } elseif (is_array($location)) {
+                                $aboutContent = isset($location['About']) && !empty($location['About']) ? $location['About'] : null;
+                            }
+                        }
+                    @endphp
+                    @if(!is_null($aboutContent) && !empty($aboutContent))
+                        {!! $aboutContent !!}
+                    @else
+                        @if($currentCity == 'Dubai')
+                            <p>A destination where every sunrise is a golden promise and every sunset a glittering spectacle, Dubai is not just a place to visit – it's a place to be endlessly inspired." Dubai is the UAE's dazzling metropolis – where desert sands meet futuristic skylines. It's a city of contrast and ambition, offering both rich Arabian heritage and ultra-modern experiences. Dubai is the shimmering crown of the United Arab</p>
+                            <p>Emirates – a futuristic oasis where golden deserts meet glass skyscrapers that seem to touch the very edge of the sky. It is a place where ancient Bedouin traditions breathe alongside ultramodern lifestyles, where you can stroll through bustling spice-scented souks in the morning and dine atop the world's tallest building by evening.</p>
+                            <p>Shopping malls are not just for shopping here; they house indoor ski slopes, giant aquariums, and virtual reality parks, making each visit an adventure of its own. Dubai is a destination that redefines the meaning of luxury and leisure, blending thrilling desert safaris with beach relaxation, Michelin-starred dining with</p>
+                            <p>street food delights, and cultural immersions with futuristic innovations. It is a city that promises limitless possibilities, inviting you to witness human ambition carved into architectural marvels while still feeling the timeless soul of Arabia echoing through its warm winds and golden sands.</p>
+                        @else
+                            <p>{{ $currentCity }} is a captivating destination that offers visitors a unique blend of cultural experiences, scenic beauty, and unforgettable adventures. From its distinctive landmarks to its local cuisine, {{ $currentCity }} presents travelers with countless opportunities to explore and discover.</p>
+                            <p>Whether you're interested in historical sites, natural wonders, or vibrant city life, {{ $currentCity }} has something to offer every type of traveler. The city's rich heritage and modern developments create a fascinating contrast that makes it a must-visit destination.</p>
+                            <p>Visitors to {{ $currentCity }} can enjoy a diverse range of activities, from exploring museums and galleries to sampling local delicacies at restaurants and street food stalls. The city's unique atmosphere and welcoming locals make every experience memorable.</p>
+                        @endif
+                    @endif
+                </div>
+
+                <div class="info-section mb-32">
+                    <h3 class="mb-8">Best Time to Visit</h3>
+                    @php
+                        $bestTimeContent = null;
+                        
+                        // Check if location exists and extract BestTimeToVisit content
+                        if (isset($location) && !empty($location)) {
+                            if (is_object($location)) {
+                                $bestTimeContent = isset($location->BestTimeToVisit) && !empty($location->BestTimeToVisit) ? $location->BestTimeToVisit : null;
+                            } elseif (is_array($location)) {
+                                $bestTimeContent = isset($location['BestTimeToVisit']) && !empty($location['BestTimeToVisit']) ? $location['BestTimeToVisit'] : null;
+                            }
+                        }
+                    @endphp
+                    @if(!is_null($bestTimeContent) && !empty($bestTimeContent))
+                        {!! $bestTimeContent !!}
+                    @else
+                        @if($currentCity == 'Dubai')
+                            <p>November – March | 20°C – 30°C (68°F – 86°F)</p>
+                            <p>Pleasant weather for outdoor activities, beach days, and desert safaris.</p>
+                            <h4 class="mb-8">Avoid:</h4>
+                            <p>June – August | Above 40°C (104°F+)</p>
+                            <p>Extreme heat limits outdoor plans.</p>
+                            <p>Ramadan (Variable Dates): Reduced daytime dining and shorter attraction hours.</p>
+                        @else
+                            <p>The ideal time to visit {{ $currentCity }} depends on your preferences for weather and activities.</p>
+                            <p>Generally, the most comfortable seasons offer moderate temperatures and fewer crowds.</p>
+                            <p>Check local seasonal events and festivals when planning your trip to {{ $currentCity }}.</p>
+                        @endif
+                    @endif
+                </div>
+
+                <div class="info-section mb-32">
+                    <h3 class="mb-8">Top Reasons to Visit</h3>
+                    @php
+                        $topReasonsContent = null;
+                        
+                        // Check if location exists and extract TopReasonsToVisit content
+                        if (isset($location) && !empty($location)) {
+                            if (is_object($location)) {
+                                $topReasonsContent = isset($location->TopReasonsToVisit) && !empty($location->TopReasonsToVisit) ? $location->TopReasonsToVisit : null;
+                            } elseif (is_array($location)) {
+                                $topReasonsContent = isset($location['TopReasonsToVisit']) && !empty($location['TopReasonsToVisit']) ? $location['TopReasonsToVisit'] : null;
+                            }
+                        }
+                    @endphp
+                    @if(!is_null($topReasonsContent) && !empty($topReasonsContent))
+                        {!! $topReasonsContent !!}
+                    @else
+                        @if($currentCity == 'Dubai')
+                            <ul class="styled-list mb-12">
+                                <li>Burj Khalifa: World's tallest building with panoramic views</li>
+                                <li>Desert Safaris: Dune bashing, camel rides, Bedouin camps</li>
+                                <li>Shopping: Dubai Mall, Mall of the Emirates, traditional souks</li>
+                                <li>Palm Jumeirah: Iconic man-made island with luxury resorts</li>
+                                <li>Cultural Heritage: Al Fahidi Neighbourhood, Dubai Museum</li>
+                                <li>Family Fun: Aquaventure Waterpark, IMG Worlds of Adventure</li>
+                                <li>Cuisine: From street shawarma to Michelin-star dining</li>
+                            </ul>
+                        @else
+                            <ul class="styled-list mb-12">
+                                <li>Cultural Experiences: Discover the unique heritage of {{ $currentCity }}</li>
+                                <li>Local Cuisine: Sample the distinctive flavors and dishes of the region</li>
+                                <li>Scenic Beauty: Explore the natural landscapes and viewpoints</li>
+                                <li>Historical Sites: Visit landmarks that tell the story of {{ $currentCity }}</li>
+                                <li>Shopping: Find local crafts, souvenirs, and specialty items</li>
+                                <li>Entertainment: Experience the local arts, music, and nightlife</li>
+                                <li>Outdoor Activities: Enjoy recreational opportunities in and around {{ $currentCity }}</li>
+                            </ul>
+                        @endif
+                    @endif
+                </div>
+
+                <div class="info-section mb-32">
+                    <h3 class="mb-8">Getting Around</h3>
+                    @php
+                        $gettingAroundContent = null;
+                        
+                        // Check if location exists and extract GettingAround content
+                        if (isset($location) && !empty($location)) {
+                            if (is_object($location)) {
+                                $gettingAroundContent = isset($location->GettingAround) && !empty($location->GettingAround) ? $location->GettingAround : null;
+                            } elseif (is_array($location)) {
+                                $gettingAroundContent = isset($location['GettingAround']) && !empty($location['GettingAround']) ? $location['GettingAround'] : null;
+                            }
+                        }
+                    @endphp
+                    @if(!is_null($gettingAroundContent) && !empty($gettingAroundContent))
+                        {!! $gettingAroundContent !!}
+                    @else
+                        @if($currentCity == 'Dubai')
+                            <ul class="styled-list mb-12">
+                                <li>Metro: Fast, affordable, connects major sights</li>
+                                <li>Taxis & Ride Apps (Careem, Uber): Readily available</li>
+                                <li>Hop-on Hop-off Buses: Great for first-time visitors</li>
+                                <li>Car Rentals: Convenient but requires confident city driving</li>
+                            </ul>
+                        @else
+                            <ul class="styled-list mb-12">
+                                <li>Public Transportation: Explore the local transit options in {{ $currentCity }}</li>
+                                <li>Taxis & Ride Services: Convenient for direct point-to-point travel</li>
+                                <li>Walking Tours: Discover {{ $currentCity }} on foot for a more intimate experience</li>
+                                <li>Rental Options: Consider bikes, scooters, or cars depending on your needs</li>
+                            </ul>
+                        @endif
+                    @endif
+                </div>
+
+                <div class="info-section mb-32">
+                    <h3 class="mb-8">Insider Tips</h3>
+                    @php
+                        $insiderTipsContent = null;
+                        
+                        // Check if location exists and extract InsiderTips content
+                        if (isset($location) && !empty($location)) {
+                            if (is_object($location)) {
+                                $insiderTipsContent = isset($location->InsiderTips) && !empty($location->InsiderTips) ? $location->InsiderTips : null;
+                            } elseif (is_array($location)) {
+                                $insiderTipsContent = isset($location['InsiderTips']) && !empty($location['InsiderTips']) ? $location['InsiderTips'] : null;
+                            }
+                        }
+                    @endphp
+                    @if(!is_null($insiderTipsContent) && !empty($insiderTipsContent))
+                        {!! $insiderTipsContent !!}
+                    @else
+                        @if($currentCity == 'Dubai')
+                            <ul class="styled-list mb-12">
+                                <li>Dress Code: Respectful attire in public areas; swimwear only at pools and beaches.</li>
+                                <li>Tipping: Not mandatory but appreciated; ~10% in restaurants is common.</li>
+                                <li>WiFi & Connectivity: Free WiFi at most public spaces and malls; tourist SIM cards widely available at airports.</li>
+                                <li>Cultural Etiquette: Avoid public displays of affection, especially during Ramadan.</li>
+                            </ul>
+                        @else
+                            <ul class="styled-list mb-12">
+                                <li>Local Customs: Familiarize yourself with cultural norms and practices in {{ $currentCity }}</li>
+                                <li>Best Deals: Look for city passes or discount cards for attractions in {{ $currentCity }}</li>
+                                <li>Connectivity: Check mobile network coverage and WiFi availability for travelers</li>
+                                <li>Safety Tips: Be aware of common tourist concerns and how to stay safe in {{ $currentCity }}</li>
+                            </ul>
+                        @endif
+                    @endif
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Quick Portrait END -->                 
 
   <!--BREADCRUMB - START-->
             @if(!empty($breadcumb))
@@ -752,6 +950,8 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
             </div>
             @endif
           <!--BREADCRUMB - END-->
+        
+                
   <!--FOOTER-->
   @include('frontend.footer')
   <div class="overlay" id="overLay"></div>

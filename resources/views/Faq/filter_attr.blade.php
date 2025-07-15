@@ -21,9 +21,8 @@
                    <td>{{ $value->SightId }}</td>
                    <td>{{ $value->Title }}</td>
                    <td>
-                   <a href="{{ route('edit_att_faq',[$value->SightId])}}" target="_blank"  class=" breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Attraction Faq</a> 
-                 
-                   
+                   <a href="{{ route('edit_att_faq',[$value->SightId])}}" target="_blank"  class="breadcrumb-item ml-3 margin-l"> <i class="fas fa-edit"></i>Edit Attraction Faq</a> 
+                   <a href="{{ route('qa_attraction',[$value->SightId])}}" target="_blank"  class="breadcrumb-item ml-3 margin-l"> <i class="fas fa-question-circle"></i>Question & Answer</a>
                   </td>
                    
                  </tr>
@@ -49,7 +48,8 @@
                    <td>{{ $value->hotelid }}</td>
                    <td>{{ $value->name }}</td>
                    <td>                 
-                   <a href="{{ route('edit_hotel_faq',[$value->hotelid])}}" target="_blank" class="margin-l"><i class="fas fa-edit"></i>Edit Hotel Faq</a>                    
+                   <a href="{{ route('edit_hotel_faq',[$value->hotelid])}}" target="_blank" class="margin-l"><i class="fas fa-edit"></i>Edit Hotel Faq</a>
+                   <a href="{{ route('qa_hotel',[$value->hotelid])}}" target="_blank" class="margin-l"><i class="fas fa-question-circle"></i>Question & Answer</a>                    
                   </td>
                    
                  </tr>

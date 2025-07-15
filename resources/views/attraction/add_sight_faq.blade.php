@@ -66,8 +66,8 @@
                                   required>
 
                           <div class="form-group">
-                            <strong>Question</strong>
-                            <textarea type="text" name="question" class="form-control rounded-3"
+                            <strong>Faquestion</strong>
+                            <textarea type="text" name="Faquestion" class="form-control rounded-3"
                                required></textarea>
                           </div>
                           <div class="form-group">

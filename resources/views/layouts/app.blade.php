@@ -468,7 +468,7 @@
   </div>
   <!-- header ends here -->
   <main>
-    {{ $slot }}
+    @yield('content')
   </main>
 
 
@@ -640,6 +640,7 @@
   <script src="{{asset('/assets/js/main.js')}}"></script>
 <script src="{{asset('/assets/js/custom.js')}}"></script>
   <script src="{{asset('/assets/js/plugins/apexcharts.min.js')}}"></script>
+  <script src="//cdn.ckeditor.com/4.22.1/standard/ckeditor.js"></script>
   <script src="{{asset('/assets/js/pages/dashboard-default.js')}}"></script>
   @stack('scripts')
   <!-- [Page Specific JS] end -->

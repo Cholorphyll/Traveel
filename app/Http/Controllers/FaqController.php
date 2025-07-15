@@ -37,9 +37,9 @@ class FaqController extends Controller
 
    public function edit_att_faq($id){
         
-    $getfaq = DB::table('SightQuestion')->leftJoin('Sight','Sight.SightId','=','SightQuestion.SightId')
-    ->select('SightQuestion.*','Sight.Title')
-    ->where('SightQuestion.SightId',$id)->get();
+    $getfaq = DB::table('SightListingDetailFaq')->leftJoin('Sight','Sight.SightId','=','SightListingDetailFaq.SightId')
+        ->select('SightListingDetailFaq.*','Sight.Title')
+        ->where('SightListingDetailFaq.SightId',$id)->get();
     
     return view('Faq.edit_sight_faq',['getfaq'=>$getfaq]);
     }
@@ -150,4 +150,121 @@ class FaqController extends Controller
           return view('Faq.edit_experience_faq',['getfaq'=>$getfaq]);
       }
       
+    public function qa_attraction($id){
+        $questions = DB::table('SightQuestion')
+            ->leftJoin('Sight', 'Sight.SightId', '=', 'SightQuestion.SightId')
+            ->select('SightQuestion.*', 'Sight.Title')
+            ->where('SightQuestion.SightId', $id)
+            ->get();
+        
+        return view('Faq.attraction_qa', ['questions' => $questions, 'sightId' => $id]);
+    }
+    
+    public function qa_hotel($id){
+        $questions = DB::table('SightQuestion')
+            ->leftJoin('TPHotel', 'TPHotel.hotelid', '=', 'SightQuestion.HotelId')
+            ->select('SightQuestion.*', 'TPHotel.name')
+            ->where('SightQuestion.HotelId', $id)
+            ->get();
+        
+        return view('Faq.hotel_qa', ['questions' => $questions, 'hotelId' => $id]);
+    }
+    
+    // Attraction Q&A CRUD operations
+    public function store_attraction_qa(Request $request){
+        $validated = $request->validate([
+            'sight_id' => 'required|integer',
+            'question' => 'required|string|max:255',
+            'answer' => 'required|string'
+        ]);
+        
+        DB::table('SightQuestion')->insert([
+            'SightId' => $request->sight_id,
+            'question' => $request->question,
+            'answer' => $request->answer,
+            'created_at' => now(),
+            'updated_at' => now()
+        ]);
+        
+        return redirect()->back()->with('success', 'Question added successfully!');
+    }
+    
+    public function update_attraction_qa(Request $request){
+        $validated = $request->validate([
+            'question_id' => 'required|integer',
+            'question' => 'required|string|max:255',
+            'answer' => 'required|string'
+        ]);
+        
+        DB::table('SightQuestion')
+            ->where('id', $request->question_id)
+            ->update([
+                'question' => $request->question,
+                'answer' => $request->answer,
+                'updated_at' => now()
+            ]);
+        
+        return redirect()->back()->with('success', 'Question updated successfully!');
+    }
+    
+    public function delete_attraction_qa(Request $request){
+        $validated = $request->validate([
+            'question_id' => 'required|integer'
+        ]);
+        
+        DB::table('SightQuestion')
+            ->where('id', $request->question_id)
+            ->delete();
+        
+        return redirect()->back()->with('success', 'Question deleted successfully!');
+    }
+    
+    // Hotel Q&A CRUD operations
+    public function store_hotel_qa(Request $request){
+        $validated = $request->validate([
+            'hotel_id' => 'required|integer',
+            'question' => 'required|string|max:255',
+            'answer' => 'required|string'
+        ]);
+        
+        DB::table('SightQuestion')->insert([
+            'HotelId' => $request->hotel_id,
+            'question' => $request->question,
+            'answer' => $request->answer,
+            'created_at' => now(),
+            'updated_at' => now()
+        ]);
+        
+        return redirect()->back()->with('success', 'Question added successfully!');
+    }
+    
+    public function update_hotel_qa(Request $request){
+        $validated = $request->validate([
+            'question_id' => 'required|integer',
+            'question' => 'required|string|max:255',
+            'answer' => 'required|string'
+        ]);
+        
+        DB::table('SightQuestion')
+            ->where('id', $request->question_id)
+            ->update([
+                'question' => $request->question,
+                'answer' => $request->answer,
+                'updated_at' => now()
+            ]);
+        
+        return redirect()->back()->with('success', 'Question updated successfully!');
+    }
+    
+    public function delete_hotel_qa(Request $request){
+        $validated = $request->validate([
+            'question_id' => 'required|integer'
+        ]);
+        
+        DB::table('SightQuestion')
+            ->where('id', $request->question_id)
+            ->delete();
+        
+        return redirect()->back()->with('success', 'Question deleted successfully!');
+    }
 }

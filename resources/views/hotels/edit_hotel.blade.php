@@ -381,8 +381,42 @@
 
     <!-- Hidden Data for Amenities -->
 <div id="amenitiesData" data-amenities='[
-{"id":6,"name":"Business center","groupName":"Services"},
+  {"id":348,"name":"Adults only","groupName":"General"},
+  {"id":4,"name":"TV","groupName":"Room"},
   {"id":9,"name":"Restaurant","groupName":"General"},
+  {"id":11,"name":"AC","groupName":"Room"},
+  {"id":16,"name":"Minibar","groupName":"Room"},
+  {"id":22,"name":"24 hr room service","groupName":"Room"},
+  {"id":23,"name":"Balcony","groupName":"Room"},
+  {"id":24,"name":"Wake up service","groupName":"Services"},
+  {"id":35,"name":"Ironing board","groupName":"Room"},
+  {"id":47,"name":"Fax","groupName":"Services"},
+  {"id":54,"name":"Free parking","groupName":"Parking"},
+  {"id":66,"name":"Wheelchair access","groupName":"General"},
+  {"id":61,"name":"Bathrobes","groupName":"Room"},
+  {"id":62,"name":"Inhouse movies","groupName":"Room"},
+  {"id":67,"name":"Crib available","groupName":"Room"},
+  {"id":70,"name":"Tennis courts","groupName":"Activities"},
+  {"id":78,"name":"Doctor on call","groupName":"Services"},
+  {"id":80,"name":"Playground","groupName":"Activities"},
+  {"id":86,"name":"Sunbathing Terrace","groupName":"Activities"},
+  {"id":92,"name":"Table tennis","groupName":"Activities"},
+  {"id":97,"name":"Barbecue Area","groupName":"General"},
+  {"id":100,"name":"Animation","groupName":"Activities"},
+  {"id":105,"name":"Nightclub","groupName":"Activities"},
+  {"id":112,"name":"Horse Riding","groupName":"Activities"},
+  {"id":117,"name":"Ski room","groupName":"General"},
+  {"id":124,"name":"Free local telephone calls","groupName":"Services"},
+  {"id":126,"name":"Water Sports","groupName":"Activities"},
+  {"id":129,"name":"Wi-Fi","groupName":"General"},
+  {"id":136,"name":"English","groupName":"Staff languages"},
+  {"id":137,"name":"Russian","groupName":"Staff languages"},
+  {"id":5,"name":"Telephone","groupName":"Room"},
+  {"id":12,"name":"Shops","groupName":"General"},
+  {"id":18,"name":"Internet","groupName":"General"},
+  {"id":29,"name":"Disabled facilities","groupName":"General"},
+  {"id":31,"name":"Daily newspaper","groupName":"Room"},
+  {"id":6,"name":"Business center","groupName":"Services"},
   {"id":13,"name":"Laundry service","groupName":"Services"},
   {"id":14,"name":"Bar","groupName":"General"},
   {"id":15,"name":"Sauna","groupName":"Activities"},
@@ -409,77 +443,52 @@
   {"id":75,"name":"Multilingual staff","groupName":"General"},
   {"id":76,"name":"Parasols","groupName":"General"},
   {"id":77,"name":"Luggage room","groupName":"General"},
-  {"id":78,"name":"Doctor on call","groupName":"Services"},
   {"id":79,"name":"Water sports (non-motorized)","groupName":"Activities"},
-  {"id":80,"name":"Playground","groupName":"Activities"},
   {"id":81,"name":"Library","groupName":"General"},
   {"id":82,"name":"Wellness","groupName":"Activities"},
   {"id":88,"name":"Breakfast to go","groupName":"Services"},
   {"id":89,"name":"Launderette","groupName":"General"},
   {"id":91,"name":"Washing machine","groupName":"General"},
-  {"id":92,"name":"Table tennis","groupName":"Activities"},
   {"id":93,"name":"Casino","groupName":"Activities"},
   {"id":94,"name":"Beauty Salon","groupName":"Services"},
   {"id":95,"name":"Steam Room","groupName":"General"},
   {"id":96,"name":"Rent a car in the hotel","groupName":"Parking"},
-  {"id":97,"name":"Barbecue Area","groupName":"General"},
   {"id":98,"name":"Games Room","groupName":"Activities"},
-  {"id":100,"name":"Animation","groupName":"Activities"},
   {"id":101,"name":"Billiards","groupName":"Activities"},
-  {"id":105,"name":"Nightclub","groupName":"Activities"},
   {"id":106,"name":"Welcome drink","groupName":"General"},
   {"id":107,"name":"LGBT friendly","groupName":"General"},
   {"id":108,"name":"Water sports (motorized)","groupName":"Activities"},
   {"id":109,"name":"Garage","groupName":"Parking"},
-  {"id":112,"name":"Horse Riding","groupName":"Activities"},
   {"id":113,"name":"Diving","groupName":"Activities"},
   {"id":114,"name":"Mini-Supermarket","groupName":"General"},
   {"id":115,"name":"Mini Golf","groupName":"Activities"},
   {"id":116,"name":"Bowling","groupName":"Activities"},
-  {"id":117,"name":"Ski room","groupName":"General"},
   {"id":118,"name":"Gift Shop","groupName":"General"},
   {"id":119,"name":"Eco Friendly","groupName":"General"},
   {"id":122,"name":"Children care/activities","groupName":"Activities"},
-  {"id":124,"name":"Free local telephone calls","groupName":"Services"},
-  {"id":126,"name":"Luggage Service","groupName":"Services"},
   {"id":128,"name":"Porters","groupName":"Services"},
-  {"id":129,"name":"Water Sports","groupName":"Activities"},
   {"id":130,"name":"Tour Desk","groupName":"General"},
   {"id":131,"name":"Wi-Fi in public areas","groupName":"General"},
   {"id":133,"name":"Wi-Fi in room","groupName":"Room"},
   {"id":134,"name":"Daily Housekeeping","groupName":"Room"},
-  {"id":148,"name":"Adults only","groupName":"General"},
-   {"id":2,"name":"Hairdryer","groupName":"Room"},
+  {"id":2,"name":"Hairdryer","groupName":"Room"},
   {"id":3,"name":"Safe","groupName":"Room"},
-  {"id":4,"name":"TV","groupName":"Room"},
-  {"id":5,"name":"Telephone","groupName":"Room"},
   {"id":7,"name":"Shower","groupName":"Room"},
   {"id":8,"name":"Non-smoking rooms","groupName":"Room"},
   {"id":10,"name":"Separate shower and tub","groupName":"Room"},
-  {"id":11,"name":"Air conditioning","groupName":"Room"},
-  {"id":16,"name":"Mini bar","groupName":"Room"},
-  {"id":18,"name":"Radio","groupName":"Room"},
   {"id":19,"name":"Desk","groupName":"Room"},
-  {"id":22,"name":"Bathroom","groupName":"Room"},
   {"id":26,"name":"Bathtub","groupName":"Room"},
   {"id":27,"name":"Coffee/tea maker","groupName":"Room"},
-  {"id":31,"name":"Daily newspaper","groupName":"Room"},
   {"id":32,"name":"In-room safe","groupName":"Room"},
   {"id":33,"name":"Balcony/terrace","groupName":"Room"},
-  {"id":35,"name":"Ironing board","groupName":"Room"},
   {"id":51,"name":"Voice mail","groupName":"Room"},
   {"id":53,"name":"Kitchenette","groupName":"Room"},
   {"id":60,"name":"Microwave","groupName":"Room"},
-  {"id":61,"name":"Bathrobes","groupName":"Room"},
-  {"id":62,"name":"Inhouse movies","groupName":"Room"},
   {"id":66,"name":"Refrigerator","groupName":"Room"},
-  {"id":67,"name":"Crib available","groupName":"Room"},
   {"id":71,"name":"Electronic room keys","groupName":"Room"},
   {"id":99,"name":"Video/DVD Player","groupName":"Room"},
   {"id":110,"name":"Slippers","groupName":"Room"},
-  {"id":125,"name":"Handicapped Room","groupName":"Room"},
-  {"id":133,"name":"Wi-Fi in room","groupName":"Room"},
-  {"id":134,"name":"Daily Housekeeping","groupName":"Room"}
+  {"id":125,"name":"Handicapped Room","groupName":"Room"}
 ]'></div>                
                         </div>
                         <div class="row">
@@ -610,23 +619,28 @@
                             <div class="form-group mt-3">
                               <strong>Phone</strong> 
                              <input type="text" name="phone" 
-       value="{{ old('phone', $gethotel[0]->Phone ?? '') }}" value="{{$gethotel[0]->Phone}}"
-       class="form-control rounded-3" 
-       placeholder="Enter Phone Number"
-       pattern="^\+?[0-9\s\(\)-]{5,20}$"
-       title="Please enter a valid phone number">
+   value="{{ old('phone', $gethotel[0]->Phone ?? '') }}"
+   class="form-control rounded-3" 
+   placeholder="Enter Phone Number"
+   pattern="^[\+0-9\(\)\s\-]{5,25}$"
+   title="Please enter a valid phone number">
 
                             </div>
                           </div>
 
                         </div>
-                        <div class="col-md-6">
-                          <div class="form-group mt-3">
-                            <strong>Email</strong>
-                            <input type="email" name='email' value="{{$gethotel[0]->Email}}"
-                              class="form-control rounded-3" placeholder="Enter Email Address">
-                          </div>
-                        </div>
+                       <div class="col-md-6">
+  <div class="form-group mt-3">
+    <strong>Email</strong>
+    <input 
+      type="email" 
+      name="email" 
+      value="{{ old('email', $gethotel[0]->Email ?? '') }}" 
+      class="form-control rounded-3" 
+      placeholder="Enter Email Address"
+    >
+  </div>
+</div>
                         @php
                         $nearestStations = json_decode($gethotel[0]->NearestStations);
                         @endphp

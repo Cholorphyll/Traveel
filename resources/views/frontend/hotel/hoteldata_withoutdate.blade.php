@@ -32,15 +32,20 @@
 </style>
   <div class="tr-title-filter-section">
                 <div class="tr-row">             
-                <h1 class="d-none d-md-block">
-                Showing 
-    @if($st !="") {{$st}} star @endif 
-    hotels in {{$lname}} 
 @php
     $hasAmenities = !empty($amenity_ids) && isset($amenity_info) && count($amenity_info) > 0;
     $hasNeighborhoods = !empty($neighborhood_info) && count($neighborhood_info) > 0;
     $hasSights = !empty($sight_info) && isset($sight_info['sight_name']);
+    $hasPropertyTypes = !empty($propertyType_ids) && isset($propertyType_info) && count($propertyType_info) > 0;
 @endphp
+                <h1 class="d-none d-md-block">
+                Showing 
+    @if($st !="") {{$st}} star @endif 
+    @if($hasPropertyTypes && !$hasNeighborhoods && !$hasSights && !$hasAmenities && $amenity == "")
+        {{ implode(', ', array_map(function($propertyType) { return $propertyType->type; }, $propertyType_info->toArray())) }} in {{$lname}}
+    @else
+        hotels in {{$lname}} 
+    @endif
 
 @if($hasNeighborhoods || $hasSights || $hasAmenities)
     @if($hasNeighborhoods)
@@ -133,6 +138,22 @@
         <h2 class="hotel-name">
           <a href="{{ url('hd-'.$searchresult->slugid .'-' .$searchresult->id .'-'.strtolower( str_replace(' ', '_',  str_replace('#', '!',$searchresult->slug) )) ) }}"
             target="_blank">{{$searchresult->name}}</a>
+          @if(isset($searchresult->propertyType) && !empty($searchresult->propertyType))
+            @php
+              $propertyTypeName = '';
+              if(isset($propertyType_info) && !empty($propertyType_info)) {
+                foreach($propertyType_info as $type) {
+                  if($type->hid == $searchresult->propertyType) {
+                    $propertyTypeName = $type->type;
+                    break;
+                  }
+                }
+              }
+            @endphp
+            @if(!empty($propertyTypeName))
+              <span class="property-type-badge">{{ $propertyTypeName }}</span>
+            @endif
+          @endif
         </h2>
         <div class="tr-rating">
           @for ($i = 0; $i < 5; $i++)

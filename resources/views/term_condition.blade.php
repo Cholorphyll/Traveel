@@ -158,7 +158,7 @@
   	"https://www.linkedin.com/company/mytravell",
 	"https://www.f6s.com/company/travell.co",
 	"https://twitter.com/wwwTravellco",
-	"https://www.crunchbase.com/organization/tripalong"
+	"https://www.crunchbase.com/organization/travell"
   	]
 	},
 	{

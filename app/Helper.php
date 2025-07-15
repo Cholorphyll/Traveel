@@ -1,16 +1,20 @@
 <?php
 
-function x($data)
-{
-	echo '<pre>';
-	print_r($data);
-	die;
+if (!function_exists('x')) {
+    function x($data)
+    {
+        echo '<pre>';
+        print_r($data);
+        die;
+    }
 }
 
-function y($data)
-{
-	echo '<pre>';
-	print_r($data);
+if (!function_exists('y')) {
+    function y($data)
+    {
+        echo '<pre>';
+        print_r($data);
+    }
 }
 
 function getAmenitiesNames($value='')
