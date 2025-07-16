@@ -74,173 +74,54 @@ class SitemapXmlController extends Controller
         return response()->view('sitemap.sitemaping',['hotcount'=>$hotcount,'tpHdetailcount'=>$tpHdetailcount]);     
     }
 
-public function generateLandingPagesSitemap($page){
-        try {
-            $limit = 20000;
-            $offset = ($page - 1) * $limit;    
-            
-            // Initialize collection for results
-            $Location = collect();
-            
-            // Calculate how many items to fetch from each category based on page number
-            if ($page == 1) {
-                // First page: prioritize amenities
-                $amenitiesLimit = 10000;
-                $neighborhoodLimit = 5000;
-                $sightLimit = 5000;
-                $amenitiesOffset = 0;
-                $neighborhoodOffset = 0;
-                $sightOffset = 0;
-            } else if ($page == 2) {
-                // Second page: more amenities and neighborhoods
-                $amenitiesLimit = 10000;
-                $neighborhoodLimit = 10000;
-                $sightLimit = 0;
-                $amenitiesOffset = 10000;
-                $neighborhoodOffset = 5000;
-                $sightOffset = 0;
-            } else if ($page == 3) {
-                // Third page: remaining neighborhoods and start sights
-                $amenitiesLimit = 0;
-                $neighborhoodLimit = 10000;
-                $sightLimit = 10000;
-                $amenitiesOffset = 20000;
-                $neighborhoodOffset = 15000;
-                $sightOffset = 0;
-            } else {
-                // Fourth page and beyond: only sights with proper pagination
-                $amenitiesLimit = 0;
-                $neighborhoodLimit = 0;
-                $sightLimit = $limit;
-                $amenitiesOffset = 0;
-                $neighborhoodOffset = 0;
-                $sightOffset = ($page - 3) * $limit - 10000; // Adjust offset for sights based on previous pages
-            }
-            
-            $totalProcessed = 0;
-            
-            // Process amenities if needed for this page
-            if ($amenitiesLimit > 0) {
-                $amenities = DB::table('Tripadvisor_amenities_url as ta')
-                    ->join('Location as l', 'l.LocationId', '=', 'ta.LocationId')
-                    ->join('TPHotel_amenities as tpha', 'tpha.name', '=', 'ta.Keyword')
-                    ->select([
-                        'ta.LocationId as Tid',
-                        'l.slugid',
-                        'l.Slug as main_slug',
-                        'tpha.slug as secondary_slug',
-                        DB::raw("'hotel' as type")
-                    ])
-                    ->whereNotNull('tpha.slug')
-                    ->where('tpha.slug', '!=', '')
-                    ->whereNotNull('l.slugid')
-                    ->where('l.slugid', '!=', '')
-                    ->whereExists(function ($query) {
-                        $query->select(DB::raw(1))
-                              ->from('Temp_Mapping as m')
-                              ->whereRaw('m.Tid = ta.LocationId');
-                    })
-                    ->orderBy('ta.LocationId')
-                    ->skip($amenitiesOffset)
-                    ->take($amenitiesLimit)
-                    ->get();
-                
-                $Location = $amenities;
-                $totalProcessed += $amenities->count();
-                
-                // Log for debugging
-                \Log::info("Landing pages sitemap page {$page}: Fetched {$amenities->count()} amenities starting from offset {$amenitiesOffset}");
-            }
-            
-            // Process neighborhoods if needed for this page
-            if ($neighborhoodLimit > 0) {
-                $neighborhoods = DB::table('Location as l')
-                    ->join('Neighborhood as n', 'n.LocationId', '=', 'l.LocationId')
-                    ->whereNotNull('n.Latitude')
-                    ->where('n.Latitude', '!=', '')
-                    ->whereNotNull('l.slugid')
-                    ->where('l.slugid', '!=', '')
-                    ->whereExists(function ($query) {
-                        $query->select(DB::raw(1))
-                              ->from('Temp_Mapping as m')
-                              ->whereRaw('m.Tid = l.LocationId');
-                    })
-                    ->select([
-                        'l.LocationId as Tid',
-                        'l.Slug as main_slug',
-                        'l.slugid',
-                        'n.slug as secondary_slug',
-                        DB::raw("'neighborhood' as type")
-                    ])
-                    ->orderBy('l.LocationId')
-                    ->skip($neighborhoodOffset)
-                    ->take($neighborhoodLimit)
-                    ->get();
-                
-                if (isset($Location)) {
-                    $Location = $Location->concat($neighborhoods);
-                } else {
-                    $Location = $neighborhoods;
-                }
-                $totalProcessed += $neighborhoods->count();
-                
-                // Log for debugging
-                \Log::info("Landing pages sitemap page {$page}: Fetched {$neighborhoods->count()} neighborhoods starting from offset {$neighborhoodOffset}");
-            }
-            
-            // Process sights if needed for this page
-            if ($sightLimit > 0) {
-                $sights = DB::table('Location as l')
-                    ->join('Sight as s', 's.LocationId', '=', 'l.LocationId')
-                    ->whereNotNull('s.Latitude')
-                    ->where('s.Latitude', '!=', '')
-                    ->whereNotNull('l.slugid')
-                    ->where('l.slugid', '!=', '')
-                    ->whereExists(function ($query) {
-                        $query->select(DB::raw(1))
-                              ->from('Temp_Mapping as m')
-                              ->whereRaw('m.Tid = l.LocationId');
-                    })
-                    ->select([
-                        'l.LocationId as Tid',
-                        'l.Slug as main_slug',
-                        'l.slugid',
-                        's.SightId as secondary_slug',
-                        DB::raw("'sight' as type")
-                    ])
-                    ->orderBy('l.LocationId')
-                    ->skip($sightOffset)
-                    ->take($sightLimit)
-                    ->get();
-                
-                if (isset($Location)) {
-                    $Location = $Location->concat($sights);
-                } else {
-                    $Location = $sights;
-                }
-                $totalProcessed += $sights->count();
-                
-                // Log for debugging
-                \Log::info("Landing pages sitemap page {$page}: Fetched {$sights->count()} sights starting from offset {$sightOffset}");
-            }
+    public function generateLandingPagesSitemap($page)
+    {
+        $limit = 20000;
+        $offset = ($page - 1) * $limit;
 
-            // If no locations were found, return an empty sitemap
-            if ($Location->isEmpty()) {
-                return response()
-                    ->view('sitemap.landing-pages', ['Location' => collect()])
-                    ->header('Content-Type', 'application/xml')
-                    ->header('Cache-Control', 'public, max-age=3600');
-            }
+        // Total counts for each category
+        $amenitiesTotal = DB::table('Tripadvisor_amenities_url as ta')
+            ->join('Location as l', 'l.LocationId', '=', 'ta.LocationId')
+            ->join('TPHotel_amenities as tpha', 'tpha.name', '=', 'ta.Keyword')
+            ->whereNotNull('tpha.slug')->where('tpha.slug', '!=', '')->count();
 
-            return response()
-                ->view('sitemap.landing-pages', ['Location' => $Location])
-                ->header('Content-Type', 'application/xml')
-                ->header('Cache-Control', 'public, max-age=3600');
+        $neighborhoodsTotal = DB::table('Location as l')
+            ->join('Neighborhood as n', 'n.LocationId', '=', 'l.LocationId')
+            ->whereNotNull('n.Latitude')->where('n.Latitude', '!=', '')->count();
 
-        } catch (\Exception $e) {
-            \Log::error('Sitemap generation error: ' . $e->getMessage());
-            return response()->json(['error' => 'Internal server error'], 500);
+        $sightsTotal = DB::table('Location as l')
+            ->join('Sight as s', 's.LocationId', '=', 'l.LocationId')
+            ->whereNotNull('s.Latitude')->where('s.Latitude', '!=', '')->count();
+
+        // Determine which category to fetch from based on the page number
+        if ($offset < $amenitiesTotal) {
+            $amenities = DB::table('Tripadvisor_amenities_url as ta')
+                ->join('Location as l', 'l.LocationId', '=', 'ta.LocationId')
+                ->join('TPHotel_amenities as tpha', 'tpha.name', '=', 'ta.Keyword')
+                ->select(['ta.LocationId as Tid', 'l.slugid', 'l.Slug as main_slug', 'tpha.slug as secondary_slug', DB::raw("'hotel' as type")])
+                ->whereNotNull('tpha.slug')->where('tpha.slug', '!=', '')
+                ->skip($offset)->take($limit)->get();
+            $Location = $amenities;
+        } elseif ($offset < $amenitiesTotal + $neighborhoodsTotal) {
+            $neighborhoodOffset = $offset - $amenitiesTotal;
+            $neighborhoods = DB::table('Location as l')
+                ->join('Neighborhood as n', 'n.LocationId', '=', 'l.LocationId')
+                ->select(['l.LocationId as Tid', 'l.Slug as main_slug', 'l.slugid', 'n.slug as secondary_slug', DB::raw("'neighborhood' as type")])
+                ->whereNotNull('n.Latitude')->where('n.Latitude', '!=', '')
+                ->skip($neighborhoodOffset)->take($limit)->get();
+            $Location = $neighborhoods;
+        } else {
+            $sightOffset = $offset - $amenitiesTotal - $neighborhoodsTotal;
+            $sights = DB::table('Location as l')
+                ->join('Sight as s', 's.LocationId', '=', 'l.LocationId')
+                ->select(['l.LocationId as Tid', 'l.Slug as main_slug', 'l.slugid', 's.SightId as secondary_slug', DB::raw("'sight' as type")])
+                ->whereNotNull('s.Latitude')->where('s.Latitude', '!=', '')
+                ->skip($sightOffset)->take($limit)->get();
+            $Location = $sights;
         }
+
+        return response()->view('sitemap.landing-pages', ['Location' => $Location])
+            ->header('Content-Type', 'application/xml');
     }
 
      public function hotellisting($pagenumber){
