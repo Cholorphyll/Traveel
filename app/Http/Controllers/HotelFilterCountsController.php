@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class HotelFilterCountsController extends Controller
 {
@@ -12,158 +13,104 @@ class HotelFilterCountsController extends Controller
         $locationid = $request->get('id');
         $chkin = $request->get('Cin');
         $checout = $request->get('Cout');
-        
-        // Base query for all hotels matching the location/dates
-        $baseQuery = DB::table('TPHotel as h')
-            ->join('hotelbookingstemp as hotemp', 'hotemp.hotelid', '=', 'h.hotelid')
-            ->whereNotNull('h.slugid');
-            
-        // Get counts for each filter category
-        $counts = [
-            'stars' => $this->getStarRatingCounts($baseQuery),
-            'amenities' => $this->getAmenityCounts($baseQuery),
-            'propertyTypes' => $this->getPropertyTypeCounts($baseQuery),
-            'agencies' => $this->getAgencyCounts($baseQuery),
-            'guestRatings' => $this->getGuestRatingCounts($baseQuery),
-            'nearbyPlaces' => $this->getNearbyCounts($baseQuery, $locationid)
-        ];
-        
+        $cacheKey = "filter_counts_{$locationid}_{$chkin}_{$checout}";
+
+        $counts = Cache::remember($cacheKey, 60, function () use ($locationid, $chkin, $checout) {
+            // Base query for all hotels matching the location/dates
+            $baseQuery = DB::table('TPHotel as h')
+                ->join('hotelbookingstemp as hotemp', 'hotemp.hotelid', '=', 'h.hotelid')
+                ->whereNotNull('h.slugid');
+
+            // Get counts for each filter category
+            $counts = [
+                'amenities' => $this->getAmenityCounts($baseQuery),
+                'nearbyPlaces' => $this->getNearbyCounts($baseQuery, $locationid)
+            ];
+
+            $results = $baseQuery->clone()
+                ->join('TPHotel_types as t', 'h.propertyType', '=', 't.hid')
+                ->select(
+                    'h.stars',
+                    't.type as propertyType',
+                    'hotemp.agency_name as agency',
+                    'h.rating',
+                    DB::raw('COUNT(DISTINCT h.hotelid) as count')
+                )
+                ->groupBy('h.stars', 't.type', 'hotemp.agency_name', 'h.rating')
+                ->get();
+
+            $counts['stars'] = $results->groupBy('stars')->map(function ($item) {
+                return $item->sum('count');
+            });
+
+            $counts['propertyTypes'] = $results->groupBy('propertyType')->map(function ($item) {
+                return $item->sum('count');
+            });
+
+            $counts['agencies'] = $results->groupBy('agency')->map(function ($item) {
+                return $item->sum('count');
+            });
+
+            $ratingRanges = [
+                '1' => [1, 2],
+                '2' => [2, 3],
+                '3' => [3, 4],
+                '4' => [4, 5],
+                '5' => [5, 6],
+                '6' => [6, 7],
+                '7' => [7, 8],
+                '8' => [8, 9],
+                '9' => [9, 9.5],
+                '9.5' => [9.5, 10],
+                '10' => [10, 10],
+            ];
+            $guestRatings = [];
+            foreach ($ratingRanges as $key => $range) {
+                $guestRatings[$key] = $results->where('rating', '>=', $range[0])->where('rating', '<', $range[1])->sum('count');
+            }
+            $counts['guestRatings'] = $guestRatings;
+
+            return $counts;
+        });
+
         return response()->json($counts);
     }
-    
-    private function getStarRatingCounts($query)
-    {
-        $starRatings = [1, 2, 3, 4, 5];
-        $counts = [];
-        
-        foreach ($starRatings as $rating) {
-            $count = $query->clone()
-                ->where('h.stars', $rating)
-                ->count(DB::raw('DISTINCT h.hotelid'));
-            $counts[$rating] = $count;
-        }
-        
-        return $counts;
-    }
-    
+
     private function getAmenityCounts($query)
     {
         $commonAmenities = [
-            'Wi-Fi in areas', // Matches blade template value exactly
-            'breakfast',      // Matches blade template value exactly  
-            'freeWifi',       // Matches blade template value exactly
-            'Parking',
-            'Gym',
-            'Laundry service',
-            'Bar',
-            'Restaurant/cafe',
-            'A/C',
-            'Private Bathroom',
-            'TV',
-            'Balcony/terrace',
-            'Bathtub',
-            'Handicapped Room',
-            'Inhouse movies',
-            'Mini bar',
-			'Swimming Pool',
-        	'24h. Reception',
-        	'Smoke-free',
-        	'Wheel chair access',
-			'refundable',
-            'cardRequired',
-            'breakfast',
-			'Bicycle rental',
-			'Tours',
-			'Sauna',
-			'Water Sports'
+            'Wi-Fi in areas', 'breakfast', 'freeWifi', 'Parking', 'Gym', 'Laundry service',
+            'Bar', 'Restaurant/cafe', 'A/C', 'Private Bathroom', 'TV', 'Balcony/terrace',
+            'Bathtub', 'Handicapped Room', 'Inhouse movies', 'Mini bar', 'Swimming Pool',
+            '24h. Reception', 'Smoke-free', 'Wheel chair access', 'refundable', 'cardRequired',
+            'Bicycle rental', 'Tours', 'Sauna', 'Water Sports'
         ];
-        
-        $counts = [];
-        
+
+        $amenityIds = DB::table('TPHotel_amenities')
+            ->whereIn('shortName', $commonAmenities)
+            ->pluck('id', 'shortName');
+
+        $selects = [];
         foreach ($commonAmenities as $amenity) {
-            $countQuery = clone $query;
-            
-            if (in_array($amenity, ['breakfast', 'freeWifi', 'refundable', 'cardRequired', 'breakfast'])) {
-                // Check hotelbookingstemp.amenity for these
-                $countQuery->where('hotemp.amenity', 'LIKE', '%'.$amenity.'%');
+            if (in_array($amenity, ['breakfast', 'freeWifi', 'refundable', 'cardRequired'])) {
+                $selects[] = DB::raw("COUNT(DISTINCT CASE WHEN hotemp.amenity LIKE '%{$amenity}%' THEN h.hotelid END) as '{$amenity}'");
             } else {
-                // Check h.amenities column for others using FIND_IN_SET
-                $amenityId = DB::table('TPHotel_amenities')
-                    ->where('shortName', $amenity)
-                    ->value('id');
-                
-                if ($amenityId) {
-                    $countQuery->whereRaw("FIND_IN_SET(?, h.facilities) > 0", [$amenityId]);
+                if (isset($amenityIds[$amenity])) {
+                    $id = $amenityIds[$amenity];
+                    $selects[] = DB::raw("COUNT(DISTINCT CASE WHEN FIND_IN_SET('{$id}', h.facilities) THEN h.hotelid END) as '{$amenity}'");
                 }
             }
-            
-            $count = $countQuery->count(DB::raw('DISTINCT h.hotelid'));
-            $counts[$amenity] = $count;
         }
-        
-        return $counts;
-    }
-    
-    private function getPropertyTypeCounts($query)
-    {
-        $commonPropertyTypes = [
-            'Room','Lodge', 'Vacation Rental','Farm Stay','Aparment Hotel','Hotel', 'Resort', 'Apartment', 'Villa', 'Hostel',
-            'Guest House', 'Motel', 'Bed and Breakfast'
-        ];
-        
+
+        $results = $query->clone()->select($selects)->first();
+
         $counts = [];
-        foreach ($commonPropertyTypes as $type) {
-            $count = $query->clone()
-                ->join('TPHotel_types as t', 'h.propertyType', '=', 't.hid')
-                ->where('t.type', $type)
-                ->count(DB::raw('DISTINCT h.hotelid'));
-            $counts[$type] = $count;
+        foreach ($commonAmenities as $amenity) {
+            $counts[$amenity] = $results->$amenity ?? 0;
         }
-        
+
         return $counts;
     }
-    
-    private function getAgencyCounts($query)
-    {
-        return $query->clone()
-            ->select('hotemp.agency_name', DB::raw('COUNT(DISTINCT h.hotelid) as count'))
-            ->whereNotNull('hotemp.agency_name')
-            ->groupBy('hotemp.agency_name')
-            ->get()
-            ->pluck('count', 'agency_name');
-    }
-  private function getGuestRatingCounts($query)
-{
-    $guestRatings = [1, 2, 3, 4, 5, 6, 7, 8, 9, 9.5, 10];
-    $counts = [];
-    
-    foreach ($guestRatings as $rating) {
-        if ($rating == 9) {
-            $count = $query->clone()
-                ->whereBetween('h.rating', [9, 9.5])
-                ->count(DB::raw('DISTINCT h.hotelid'));
-        }
-        elseif ($rating == 9.5) {
-            $count = $query->clone()
-                ->whereBetween('h.rating', [9.5, 10])
-                ->count(DB::raw('DISTINCT h.hotelid'));
-        }
-        elseif ($rating == 10) {
-            $count = $query->clone()
-                ->where('h.rating', 10)
-                ->count(DB::raw('DISTINCT h.hotelid'));
-        }
-        else {
-            $count = $query->clone()
-                ->whereBetween('h.rating', [$rating, $rating + 1])
-                ->count(DB::raw('DISTINCT h.hotelid'));
-        }
-        
-        $counts[(string)$rating] = $count;
-    }
-    
-    return $counts;
-}
 
     private function getNearbyCounts($query, $locationid)
     {     
@@ -184,9 +131,18 @@ class HotelFilterCountsController extends Controller
             
             $clonedQuery = $query->clone();
             
-            $clonedQuery->where(function($q) use ($place) {
+            try {
+                // Use ST_Distance_Sphere if available (more accurate and faster)
+                $clonedQuery->whereRaw('
+                    ST_Distance_Sphere(
+                        point(CAST(h.longnitude AS DECIMAL(10,6)), CAST(h.Latitude AS DECIMAL(10,6))),
+                        point(?, ?)
+                    ) <= ?',
+                    [(float)$place->Longitude, (float)$place->Latitude, 3000] // 3km in meters
+                );
+            } catch (\Exception $e) {
                 // Fallback to simpler distance calculation if ST_Distance_Sphere not available
-                $q->whereRaw('
+                $clonedQuery->whereRaw('
                     ROUND(
                         111.045 * SQRT(
                             POWER(ABS(CAST(h.Latitude AS DECIMAL(10,6)) - ?), 2) +
@@ -203,12 +159,12 @@ class HotelFilterCountsController extends Controller
                         (float)$place->Latitude,
                         3 // 3 km radius
                     ]
-                )
-                ->whereNotNull('h.Latitude')
-                ->whereNotNull('h.longnitude')
-                ->whereRaw('TRIM(h.Latitude) != ""')
-                ->whereRaw('TRIM(h.longnitude) != ""');
-            });       
+                );
+            }
+            $clonedQuery->whereNotNull('h.Latitude')
+            ->whereNotNull('h.longnitude')
+            ->whereRaw('TRIM(h.Latitude) != ""')
+            ->whereRaw('TRIM(h.longnitude) != ""');
       
             $count = $clonedQuery->count(DB::raw('DISTINCT h.hotelid'));               
             

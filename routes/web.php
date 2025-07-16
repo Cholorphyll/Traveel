@@ -1014,7 +1014,10 @@ Route::get('/import-experiences', function () {
 
 Route::post('/hotel/transportation', [DataController::class, 'getNearbyTransportation'])->name('hotel.transportation');
 // listing quick Portrait Show
+use App\Http\Controllers\TestController;
+
 Route::get('/listing/{city}', [ExploreController::class, 'showListing']);
 
+Route::get('/test-filter-counts', [TestController::class, 'testFilterCounts']);
 
 
