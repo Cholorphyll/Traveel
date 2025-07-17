@@ -2471,7 +2471,7 @@ jQuery(document).ready(function($) {
             @endif                                 
                                               
     <!--Budget Hotels - START-->
-    @if(!$neabyhotelwithswimingpool->isEmpty())
+    @if(isset($neabyhotelwithswimingpool) && !$neabyhotelwithswimingpool->isEmpty())
           <div class="tr-more-places tr-budget-hotels-near-you responsive-container">
               <div class="tr-heading-with-see-all">
                 <h3>Budget Hotels near {{ $location_info->Name }}</h3>		
@@ -2491,24 +2491,24 @@ jQuery(document).ready(function($) {
                     <div class="tr-hotel-name"><a href="{{ url('hd-'.$nbs->slugid .'-' .$nbs->id .'-'.strtolower( str_replace(' ', '_',  str_replace('#', '!',$nbs->slug) )) ) }}" target="_blank">{{$nbs->name}}</a></div>
                   @if($nbs->pricefrom !="")<div class="tr-price">Start from <strong>${{$nbs->pricefrom}}</strong> <span class="tr-night">/night</span></div>@endif
                  @if(!empty($nbs->OverviewShortDesc))
-    <?php
-        $OverviewShortDesc = explode(',', $nbs->OverviewShortDesc);
-        // Filter out any empty or whitespace-only strings from the array
-        $OverviewShortDesc = array_filter($OverviewShortDesc, function($value) {
-            return !empty(trim($value));
-        });
-        // Reindex the array after filtering
-        $OverviewShortDesc = array_values($OverviewShortDesc);
-    ?>
-    <div class="tr-hotel-facilities">
-        <ul>
-        @foreach($OverviewShortDesc as $index => $datas)
-            <li>{{ trim($datas, " '[]") }}</li> <!-- Trim spaces, quotes, and square brackets -->
-        @endforeach
-        </ul>
-        <button class="tr-anchor-btn toggle-list budget-more" title="Read More">Read More</button>
-    </div>
-@endif
+                        <?php
+                            $OverviewShortDesc = explode(',', $nbs->OverviewShortDesc);
+                            // Filter out any empty or whitespace-only strings from the array
+                            $OverviewShortDesc = array_filter($OverviewShortDesc, function($value) {
+                                return !empty(trim($value));
+                            });
+                            // Reindex the array after filtering
+                            $OverviewShortDesc = array_values($OverviewShortDesc);
+                        ?>
+                        <div class="tr-hotel-facilities">
+                            <ul>
+                            @foreach($OverviewShortDesc as $index => $datas)
+                                <li>{{ trim($datas, " '[]") }}</li> 
+                            @endforeach
+                            </ul>
+                            <button class="tr-anchor-btn toggle-list budget-more" title="Read More">Read More</button>
+                        </div>
+                    @endif
 
                     @if($nbs->rating != "" && $nbs->rating != 0) <div class="tr-likes">
                       <span class="tr-heart">
@@ -2526,7 +2526,7 @@ jQuery(document).ready(function($) {
                 @endforeach
               </div>
           </div>
-          @endif   
+          @endif 
             <!--Budget Hotels - END-->                                   
                                               
  @if(isset($location_info) && $location_info)
