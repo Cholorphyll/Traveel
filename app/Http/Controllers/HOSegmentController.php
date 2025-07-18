@@ -16,6 +16,15 @@ use Illuminate\Support\Facades\Http;
 
 class HOSegmentController extends Controller
 {
+
+	public function formatDate($date) {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return $date;
+        } else {
+            $date = str_replace('-', ' ', $date);
+            return Carbon::createFromFormat('d M Y', $date)->format('Y-m-d');
+        }
+    }
     
     public function hotel_list($segment, Request $request)
     {
@@ -2134,11 +2143,374 @@ class HOSegmentController extends Controller
         return $result;
     }
 
-    private function getAmenityInfo($amenity_ids) {
+    private function getAmenityInfo($amenity_ids)
+    {
         return DB::table('TPHotel_amenities')
             ->select('id', 'name', 'shortName', 'slug')
             ->whereIn('id', $amenity_ids)
             ->get();
     }
+
+public function insert_hotel_desction(request $request)
+ {
+    
+    $timeout = PHP_INT_MAX; 
+ //   $checkinDate = date('Y-m-d');
+
+    $checkin = $request->get('checkin');
+    $checkout = $request->get('checkout');
+    $hid = $request->get('hid');
+    $chkin = $checkin;
+    $checout = $checkout;       
+    $checkin = $this->formatDate($checkin);
+    $checkout = $this->formatDate($checkout);
+       $guests = 2; 
+       $rooms = 1;
+
+       $stchin = $checkin;
+       $checkout = $checkout;
+
+       $cmbdate = $checkin.'_'.$checkout;
+       $checkin =  $checkin;
+
+
+       //new code start
+       $checkinDate = $checkin;         
+       $checkoutDate = $checkout;       
+       $adultsCount = 2; //$guests;              
+       $customerIP = '49.156.89.145'; 
+       $childrenCount = '1'; 
+       $chid_age = '10';
+       $lang = 'en'; 
+       $currency ='USD'; 
+       $waitForResult ='0'; 
+       $iata=$hid; 
+       
+       $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869"; 
+       $TRAVEL_PAYOUT_MARKER = "299178"; 
+
+       $SignatureString = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$adultsCount.":". 
+       $checkinDate.":". 
+       $checkoutDate.":".
+       $chid_age.":". 
+       $childrenCount.":". 
+       $currency.":". 
+       $customerIP.":". 
+       $iata.":".       
+       $lang.":". 
+       $waitForResult; 
+
+
+       $signature = md5($SignatureString);
+    
+
+       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;   
+
+
+
+       $response = Http::withoutVerifying()->get($url);
+
+       if ($response->successful()) {
+           
+       
+       $data = json_decode($response);
+           if(!empty($data)){
+           $searchId = $data->searchId;    
+           
+
+           $limit =10;
+           $offset=0;
+           $roomsCount=10;
+           $sortAsc=1;
+           $sortBy='price';
+
+           $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
+           $sig2 =  md5($SignatureString2);    
+
+           $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=10&sortBy=price&sortAsc=1&roomsCount=10&offset=0&marker=299178&signature='.$sig2;
+
+           $maxAttempts = 4;
+           $retryInterval = 1; 
+           $response2 = Http::withoutVerifying()
+           ->timeout(0) 
+           ->retry($maxAttempts, $retryInterval)
+           ->get($url2);   
+
+           $jsonResponse = json_decode($response2, true);
+
+           if ($jsonResponse['status'] == 'ok') {
+               $hotels = $jsonResponse['result'];
+               $rooms = [];
+               $roomsData = [];
+      
+               foreach ($hotels as $hotel) {
+                   if (isset($hotel['rooms']) && is_array($hotel['rooms'])) {
+
+                       foreach ($hotel['rooms'] as $room) {
+                           $rooms[] = [
+                               'options' => $room['options'],
+                               'desc' => $room['desc'],
+                           	   'price' => $room['price'] ?? 0,
+                           		'booking_url' => $room['fullBookingURL'] ?? 0,
+    							'agencyId' => $room['agencyId'] ?? null,
+   								'agencyName' => $room['agencyName'] ?? '',
+                           ];
+                           $roomName = $room['desc'];
+                           $amenities = $room['options'];
+                           $roomsData[$roomName] = $amenities;
+                       }
+                   }
+               }
+
+               $getdata = DB::table('TPRoomtype_tmp')->where('hotelid', $hid)->get();
+if (!$getdata->isEmpty()) {
+    $roomData = [];
+    foreach ($rooms as $room) {
+        $desc = $room['desc'];
+        $options = $room['options'];
+
+        // Update or insert into TPRoomtype_tmp
+        DB::table('TPRoomtype_tmp')->updateOrInsert(
+            ['hotelid' => $hid, 'roomType' => $desc],
+            [
+                'roomType' => $desc,
+                'roomtypeid' => 0, // Default value
+                'breakfast' => $options['breakfast'] ?? 0,
+                'available' => $options['available'] ?? 1,
+                'halfBoard' => $options['halfBoard'] ?? 0,
+                'ultraAllInclusive' => $options['ultraAllInclusive'] ?? 0,
+                'allInclusive' => $options['allInclusive'] ?? 0,
+                'refundable' => $options['refundable'] ?? 0,
+                'freeWifi' => $options['freeWifi'] ?? 0,
+                'fullBoard' => $options['fullBoard'] ?? 0,
+                'deposit' => $options['deposit'] ?? 0,
+                'smoking' => $options['smoking'] ?? 0,
+                'view' => $options['view'] ?? '',
+                'viewSentence' => $options['viewSentence'] ?? '',
+                'cardRequired' => $options['cardRequired'] ?? 0,
+                'beds' => $options['beds']['double'] ?? 0,
+                'doublebed' => $options['beds']['double'] ?? 0,
+                'twin' => $options['beds']['twin'] ?? 0,
+                'balcony' => $options['balcony'] ?? 0,
+                'privateBathroom' => $options['privateBathroom'] ?? 0,
+                'images' => $options['images'] ?? '',
+            	'price' => $room['price'] ?? 0,
+            	'booking_url' => $room['booking_url'] ?? 0,
+                'agencyId' => $room['agencyId'] ?? null,
+                'agencyName' => $room['agencyName'] ?? '',
+                'dt_created' => now()
+            ]
+        );
+
+        // Update or insert into TPRoomtype (store data as JSON in Roomdesc)
+        DB::table('TPRoomtype')->updateOrInsert(
+            ['hotelid' => $hid, 'Roomdesc' => $desc],
+            [
+                'Roomdesc' => json_encode([
+                    'roomType' => $desc,
+                    'options' => $options
+                ]),
+                'flag' => 1, // Default value
+                'created_at' => now()
+            ]
+        );
+    }
+    return "Data updated in TPRoomtype_tmp and TPRoomtype";
+} else {
+    $roomData = [];
+    foreach ($rooms as $room) {
+        $desc = $room['desc'];
+        $options = $room['options'];
+
+        // Insert into TPRoomtype_tmp
+        DB::table('TPRoomtype_tmp')->insert([
+            'hotelid' => $hid,
+            'roomType' => $desc,
+            'roomtypeid' => 0, // Default value
+            'breakfast' => $options['breakfast'] ?? 0,
+            'available' => $options['available'] ?? 1,
+            'halfBoard' => $options['halfBoard'] ?? 0,
+            'ultraAllInclusive' => $options['ultraAllInclusive'] ?? 0,
+            'allInclusive' => $options['allInclusive'] ?? 0,
+            'refundable' => $options['refundable'] ?? 0,
+            'freeWifi' => $options['freeWifi'] ?? 0,
+            'fullBoard' => $options['fullBoard'] ?? 0,
+            'deposit' => $options['deposit'] ?? 0,
+            'smoking' => $options['smoking'] ?? 0,
+            'view' => $options['view'] ?? '',
+            'viewSentence' => $options['viewSentence'] ?? '',
+            'cardRequired' => $options['cardRequired'] ?? 0,
+            'beds' => $options['beds']['double'] ?? 0,
+            'doublebed' => $options['beds']['double'] ?? 0,
+            'twin' => $options['beds']['twin'] ?? 0,
+            'balcony' => $options['balcony'] ?? 0,
+            'privateBathroom' => $options['privateBathroom'] ?? 0,
+            'images' => $options['images'] ?? '',
+            'price' => $room['price'] ?? 0,
+        	'booking_url' => $room['booking_url'] ?? 0,
+            'agencyId' => $room['agencyId'] ?? null,
+            'agencyName' => $room['agencyName'] ?? '',
+            'dt_created' => now()
+        ]);
+
+        // Insert into TPRoomtype (store data as JSON in Roomdesc)
+        DB::table('TPRoomtype')->insert([
+            'hotelid' => $hid,
+            'Roomdesc' => json_encode([
+                'roomType' => $desc,
+                'options' => $options
+            ]),
+            'flag' => 1, // Default value
+            'created_at' => now()
+        ]);
+    		}
+    		return "Data inserted into TPRoomtype_tmp and TPRoomtype";
+			}         
+            }   
+           }                    
+       }
+	}
+
+public function hotel_room_desc(Request $request) {
+    $checkin = $request->get('checkin');
+    $checkout = $request->get('checkout');
+    $cityId = $request->get('lid');
+    $hotelId = $request->get('hid');
+    
+	$checkin = $this->formatDate($checkin);
+    $checkout = $this->formatDate($checkout);
+
+    // Other variables and initial setup...
+    
+    // Fetch room data
+    $roomsData = [];
+    
+    if($checkin !=""  && $checkout !="") {
+        $pgtype = 'withdate';
+    
+        //   $start  =  date("H:i:s");
+        $pgtype = 'withdate';
+      
+       // $cityName = $request->get('cityName') ;
+
+       $guests = 2; //Session()->get('guest');
+       $rooms = 1;//Session()->get('rooms');
+
+       $stchin = $checkin;
+       $checkout = $checkout;
+
+       $cmbdate = $checkin.'_'.$checkout;
+       $checkin =  $checkin;
+
+
+       //new code start
+       $checkinDate = $checkin;         
+       $checkoutDate = $checkout;       
+       $adultsCount = 2; //$guests;              
+       $customerIP = '49.156.89.145'; 
+       $childrenCount = '1'; 
+       $chid_age = '10';
+       $lang = 'en'; 
+       $currency ='USD'; 
+       $waitForResult ='0'; 
+       $iata=$hotelId; 
+       
+       $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869"; 
+       $TRAVEL_PAYOUT_MARKER = "299178"; 
+
+
+
+       $SignatureString = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$adultsCount.":". 
+       $checkinDate.":". 
+       $checkoutDate.":".
+       $chid_age.":". 
+       $childrenCount.":". 
+       $currency.":". 
+       $customerIP.":". 
+       $iata.":".       
+       $lang.":". 
+       $waitForResult; 
+
+
+       $signature = md5($SignatureString);
+       //  $signature = '3193e161e98200459185e43dd7802c2c';
+
+       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;   
+
+
+
+      $response = Http::withoutVerifying()
+        ->timeout(30)  // 30 seconds timeout
+        ->retry(4, 1000) // retry 4 times with 1 second delay
+        ->get($url);
+       if ($response->successful()) {
+           
+       
+       $data = json_decode($response);
+           if(!empty($data)){
+           $searchId = $data->searchId;    
+           
+
+           $limit =10;
+           $offset=0;
+           $roomsCount=10;
+           $sortAsc=1;
+           $sortBy='price';
+
+           $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
+               $sig2 =  md5($SignatureString2);    
+
+           $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=10&sortBy=price&sortAsc=1&roomsCount=10&offset=0&marker=299178&signature='.$sig2;
+       // $response2 = Http::withoutVerifying()->get($url2);
+               
+           $maxAttempts = 4;
+           $retryInterval = 1; // seconds
+           $response2 = Http::withoutVerifying()
+           ->timeout(0) // Maximum time for an individual request
+           ->retry($maxAttempts, $retryInterval)
+           ->get($url2);   
+           $jsonResponse = json_decode($response2, true);
+           
+           //new code 1
+           if ($jsonResponse['status'] == 'ok') {
+        
+           
+               $hotels = $jsonResponse['result'];
+               $rooms = [];
+               $roomsData = [];
+
+                if ($jsonResponse['status'] == 'ok') {
+                    $hotels = $jsonResponse['result'];
+
+                    foreach ($hotels as $hotel) {
+                        if (isset($hotel['rooms']) && is_array($hotel['rooms'])) {
+                            foreach ($hotel['rooms'] as $room) {
+                                $roomsData[$room['desc']] = [
+                                    'price' => $room['total'],
+                                    'agencyId' => $room['agencyId'],
+                                    'fullBookingURL' => $room['fullBookingURL']
+                                ];
+                            }
+                        }
+
+                   //     return $roomsData;
+                    }
+                }
+
+
+            }
+        }
+    }
+}
+
+    $TPRoomtype = DB::table('TPRoomtype')->select('Roomdesc')->where('hotelid', $hotelId)->get();
+	$tpdesc =[];
+    return response()->json([
+        'roomsData' => $roomsData,
+        'TPRoomtype' => $TPRoomtype,
+		 'tpdesc' => $tpdesc
+    ]);
+}
+//filter hotel room detail page
     
 }
