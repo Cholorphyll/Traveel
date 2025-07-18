@@ -21,4 +21,9 @@ class Neighborhood extends Model
         'slug',
         // Add other fields as necessary
     ];
+
+    public function location()
+    {
+        return $this->belongsTo(Location::class, 'LocationID', 'LocationId');
+    }
 }

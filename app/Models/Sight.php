@@ -43,4 +43,9 @@ class Sight extends Model
     	'Likes',
         'Dislikes'
     ];
+
+    public function location()
+    {
+        return $this->belongsTo(Location::class, 'Location_id', 'slugid');
+    }
 }

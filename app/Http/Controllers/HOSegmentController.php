@@ -11,11 +11,17 @@ use Illuminate\Support\Str;
 use Carbon\Carbon;
 use DateTimeZone;
 use Illuminate\Support\Facades\Http;
-
+use App\Services\HotelService;
 
 
 class HOSegmentController extends Controller
 {
+    protected $hotelService;
+
+    public function __construct(HotelService $hotelService)
+    {
+        $this->hotelService = $hotelService;
+    }
 
 	public function formatDate($date) {
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
@@ -28,331 +34,59 @@ class HOSegmentController extends Controller
     
     public function hotel_list($segment, Request $request)
     {
-
         $segment_parts = explode('-', $segment);
         if (!empty($segment_parts[0]) && is_numeric($segment_parts[0]) && strlen($segment_parts[0]) < 5) {
             $segment_parts[0] = str_pad($segment_parts[0], 5, '0', STR_PAD_LEFT);
             $segment = implode('-', $segment_parts);
             return redirect()->route('hotel.list', [$segment]);
-       	 }
-   
-         // Initialize variables
-        $id = null;
-        $slug = null;
+        }
+
+        list($id, $filters, $redirect_needed) = $this->parseSegment($segment);
+
+        $slug = $filters['slug'];
+        $st = $filters['st'];
+        $reviewscore = $filters['rs'];
+        $price = $filters['price'];
+        $amenity_slugs = $filters['amenity_slugs'];
+        $neighborhood_slugs = $filters['neighborhood_slugs'];
+        $propertytype_slugs = $filters['propertyType_slugs'];
+        $sight_slugs = $filters['sight_slugs'];
+        $amenity_ids = $filters['amenities'];
+        $neighborhood_ids = $filters['neighborhoods'];
+        $propertyType_ids = $filters['propertyTypes'];
+        $sight_ids = $filters['sights'];
+        $amenity = '';
+
+        // Initialize variables
         $desiredId = null;
         $lslugid = "";
         $lslug = "";
-        $st = "";
-        $amenity = "";
-        $price = "";
-        $reviewscore = "";
         $filtertype = null;
-        $amenity_slugs = null;
-        $neighborhood_slugs = null;
-        $propertytype_slugs = null;
-        $redirect_needed = false;
-        $sight_slugs = null;
-    
-          // Split segment by '-' to separate all parts
-        $parts = explode('-', $segment);
-        
-        if (!empty($parts)) {
-            // Get the ID (first part)
-            $id = array_shift($parts);
 
-            // Process remaining parts
-            $city_parts = [];
-            $filter_parts = [];
-            $special_filters = [];
-            $processed_amenities = [];
-            $processed_neighborhoods = [];
-            $processed_propertyTypes = [];
-            $processed_sights = [];
-            $current_part_type = null;
-    
-            foreach ($parts as $part) {
-    
-                // Skip if this part is already processed as a name
-                if (isset($processed_amenities[$part]) || isset($processed_neighborhoods[$part]) || isset($processed_sights[$part]) || isset($processed_propertyTypes[$part])) {
-                    continue;
-                }
-    
-                // Check for special filters first
-                if (preg_match('/^st\d+$/', $part)) {
-                    $st = trim(str_replace('st', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-                elseif (preg_match('/^rs\d+$/', $part)) {
-                    $reviewscore = trim(str_replace('rs', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-            elseif (in_array($part, ['free_cancellation', 'parking', 'Internet', 'breakfast'])) {
-        // Debug logging
-        
-        $amenity = $part;
-        $filtertype = $part;
-        $special_filters[] = $part;
-        
-        // Map text-based amenities to their IDs
-        switch ($part) {
-            case 'free_cancellation':
-                $amenity_ids[] = 1; // Replace with actual ID from your database
-                break;
-            case 'parking':
-                $amenity_ids[] = 2; // Replace with actual ID from your database
-                break;
-            case 'Internet':
-                $amenity_ids[] = 3; // Replace with actual ID from your database
-                break;
-            case 'breakfast':
-                $amenity_ids[] = 4; // Replace with actual ID from your database
-                break;
-        }
-    }
-                elseif (preg_match('/^price\d+$/', $part)) {
-                    $price = trim(str_replace('price', '', $part));
-                    $filtertype = $part;
-                    $special_filters[] = $part;
-                }
-                // Check for property type with number (e.g., pt12)
-    elseif (preg_match('/^pt(\d+)$/', $part, $matches)) {
-        $propertyType_id = $matches[1];
+        if ($redirect_needed) {
+            // Build the new URL maintaining the correct order
+            $new_url_parts = ['ho', $id, $slug];
 
-        // Skip if we've already processed this property type
-        if (isset($processed_propertyTypes[$part])) {
-            continue;
-        }
+            if ($st) $new_url_parts[] = 'st' . $st;
+            if ($reviewscore) $new_url_parts[] = 'rs' . $reviewscore;
+            if ($price) $new_url_parts[] = 'price' . $price;
+            if ($amenity_slugs) $new_url_parts[] = $amenity_slugs;
+            if ($neighborhood_slugs) $new_url_parts[] = $neighborhood_slugs;
+            if ($propertytype_slugs) $new_url_parts[] = $propertytype_slugs;
+            if ($sight_slugs) $new_url_parts[] = $sight_slugs;
 
-        $propertyType_info = DB::table('TPHotel_types')
-            ->select('type')
-            ->where('hid', $propertyType_id)
-            ->first();
+            $new_url = implode('-', array_filter($new_url_parts));
 
-        if ($propertyType_info && $propertyType_info->type) {
-            // Generate slug from the type field - use same pattern as amenities and neighborhoods
-            $propertyType_slug = preg_replace('/[^a-z0-9-]+/', '-', strtolower($propertyType_info->type));
-            $propertyType_slug = trim($propertyType_slug, '-');
-            
-            // Check if this property type is already in the URL
-            $property_part = $part . '-' . $propertyType_slug;
-            if (!strpos($segment, $property_part)) {
-                $filter_parts[] = $property_part;
-                $redirect_needed = true;
-            } else {
-                $filter_parts[] = $property_part;
-            }
-            
-            // Mark this property type as processed to avoid duplicates
-            $processed_propertyTypes[$part] = true;
-
-            // Store just the part (pt4) without the slug for later use
-            if ($propertytype_slugs === null) {
-                $propertytype_slugs = $part;
-            } else {
-                $propertytype_slugs .= '-' . $part;
-            }
-        } else {
-            $filter_parts[] = $part;
-        }
-        $current_part_type = 'propertyType';
-    }
-                // Check for amenity with number (e.g., a33)
-                elseif (preg_match('/^a[a-z]+(\d+)$/', $part, $matches)) {
-                    $amenity_id = $matches[1]; 
-       
-                    // Skip if we've already processed this amenity
-                    if (isset($processed_amenities[$part])) {
-                        continue;
-                    }
-    
-                    $amenity_info = DB::table('TPHotel_amenities')
-                        ->select('name', 'slug')
-                        ->where('id', $amenity_id)
-                        ->first();
-    
-                    if ($amenity_info && $amenity_info->name) {
-                        $amenity_name = str_replace(' ', '-', strtolower($amenity_info->name));
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $amenity_name)) {
-                            $filter_parts[] = $part . '-' . $amenity_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $amenity_name;
-                        }
-                        $processed_amenities[$part] = true;
-                        
-                        if ($amenity_slugs === null) {
-                            $amenity_slugs = $part;
-                        } else {
-                            $amenity_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'amenity';
-                }
-                // Check for neighborhood with number (e.g., n5)
-                elseif (preg_match('/^n[a-z]+(\d+)$/', $part, $matches)) {
-                    $neighborhood_id = $matches[1]; // Extracts only the numeric part
-    
-                    
-                    // Skip if we've already processed this neighborhood
-                    if (isset($processed_neighborhoods[$part])) {
-                        continue;
-                    }
-    
-    $neighborhood_info = DB::table('Neighborhood')
-        ->select('NeighborhoodId', 'Name', 'slug', 'LocationID') // Make sure to select LocationId
-        ->where('NeighborhoodId', $neighborhood_id)
-        ->first();
-    
-    if (!$neighborhood_info) {
-        // If the neighborhood is not found, show a 404 error
-        abort(404);
-    }
-    
-    // Fetch the LocationId from the Location table using the slugid
-    $location_info = DB::table('Location')
-        ->select('LocationId')
-        ->where('slugid', $id) // Assuming $id is the slugid
-        ->first();
-    
-    if ($location_info && $neighborhood_info->LocationID == $location_info->LocationId) {
-        // Proceed to show the neighborhood page
-    } else {
-        // Handle the case where the neighborhood does not belong to the location
-        abort(404); // Show a 404 error if the neighborhood does not belong to the location
-    }
-                    if ($neighborhood_info && $neighborhood_info->Name) {
-                       $neighborhood_name = preg_replace('/[\/\(\)]/', '-', strtolower($neighborhood_info->Name));
-        
-                        $neighborhood_name = str_replace(' ', '-', strtolower($neighborhood_name));
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $neighborhood_name)) {
-                            $filter_parts[] = $part . '-' . $neighborhood_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $neighborhood_name;
-                        }
-                        $processed_neighborhoods[$part] = true;
-                        
-                        if ($neighborhood_slugs === null) {
-                            $neighborhood_slugs = $part;
-                        } else {
-                            $neighborhood_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'neighborhood';
-                }
-    
-    
-                elseif (preg_match('/^sqx(\d+)$/', $part, $matches)) {
-                    $sight_id = $matches[1]; // Extracts only the numeric part
-                    
-                    // Skip if we've already processed this sight
-                    if (isset($processed_sights[$part])) {
-                        continue;
-                    }
-    
-                    $sight = DB::table('Sight')
-                    ->select('Title', 'SightId','Location_id', 'LocationId','Latitude','Longitude')
-                    ->where('SightId', $sight_id)
-                    ->first();
-            
-            
-                if (!$sight) {
-                    // If the sight is not found, show a 404 error
-                    abort(404);
-                }
-            
-                // Now check if this sight belongs to the correct location
-                if ($sight->Location_id != $id) {
-                    // If the sight doesn't belong to this location, show 404
-                    abort(404);
-                }
-    
-                    if ($sight && $sight->Title) {
-                        $sight_name = preg_replace('/[^a-z0-9-]+/', '-', strtolower($sight->Title));
-                        $sight_name = str_replace(' ', '-', strtolower($sight_name));
-                        
-                        // Only redirect if the name isn't already in the URL
-                        if (!strpos($segment, $part . '-' . $sight_name)) {
-                            $filter_parts[] = $part . '-' . $sight_name;
-                            $redirect_needed = true;
-                        } else {
-                            $filter_parts[] = $part . '-' . $sight_name;
-                        }
-                        $processed_sights[$part] = true;
-                        
-                        if ($sight_slugs === null) {
-                            $sight_slugs = $part;
-                        } else {
-                            $sight_slugs .= '-' . $part;
-                        }
-                    } else {
-                        $filter_parts[] = $part;
-                    }
-                    $current_part_type = 'sight';
-                }
-    
-                // If it's a text part following an amenity, neighborhood, property type, or sight ID, skip it
-                elseif (preg_match('/^[a-zA-Z\-]+$/', $part) && 
-                       ($current_part_type == 'amenity' || $current_part_type == 'neighborhood' || $current_part_type == 'sight' || $current_part_type == 'propertyType')) {
-                    continue;
-                }
-                // If none of the above, it's part of the city name
-                else {
-                    $city_parts[] = $part;
-                    $current_part_type = 'city';
-                }
-            }
-    
-            // Combine city parts to form the slug
-            if (!empty($city_parts)) {
-                $slug = implode('-', $city_parts);
-            }
-    
-            // If we need to redirect to include names
-            if ($redirect_needed) {
-                // Build the new URL maintaining the correct order
-                $new_url_parts = ['ho'];
-                
-                // Add ID first
-                if ($id) {
-                    $new_url_parts[] = $id;
-                }
-                
-                // Add city parts
-                if (!empty($city_parts)) {
-                    $new_url_parts[] = implode('-', $city_parts);
-                }
-                
-                // Add special filters
-                if (!empty($special_filters)) {
-                    $new_url_parts = array_merge($new_url_parts, $special_filters);
-                }
-                
-                // Add amenities and neighborhoods with their names
-                if (!empty($filter_parts)) {
-                    $new_url_parts = array_merge($new_url_parts, array_unique($filter_parts));
-                }
-                
-                $new_url = implode('-', $new_url_parts);
-                
-                // Only redirect if the URL is actually different
-                if ($new_url !== 'ho-' . $segment) {
-    
-                    return redirect($new_url);
-                }
+            // Only redirect if the URL is actually different
+            if ($new_url !== 'ho-' . $segment) {
+                return redirect($new_url);
             }
         }
  
         // Check if location exists in Temp_Mapping by slugid
-        $locationExists = DB::table('Temp_Mapping')->where('slugid', $id)->first();
+        $locationExists = Cache::remember("temp_mapping_{$id}", 86400, function() use ($id) {
+            return DB::table('Temp_Mapping')->where('slugid', $id)->first();
+        });
         
         if ($locationExists) {
             // Fix: Set the slug variable to match what's in the database
@@ -411,146 +145,117 @@ class HOSegmentController extends Controller
 } 
 
        // Parse amenity IDs
-    $amenity_ids = [];
-    if ($amenity_slugs) {
-        $amenity_parts = explode('-', $amenity_slugs);
-        
-        // Create a cache key based on the amenity slugs
-        $amenityCacheKey = "amenity_ids_" . md5(implode('_', $amenity_parts));
-        
-        // Cache amenity IDs for 24 hours (86400 seconds)
-        $amenity_ids = Cache::remember($amenityCacheKey, 86400, function() use ($amenity_parts) {
-            $ids = [];
-            foreach ($amenity_parts as $part) {
-                if (preg_match('/^a[a-z]+(\d+)$/', $part, $matches)) {
-                    $ids[] = $matches[1]; // Store the ID value
+        if ($amenity_slugs) {
+            $amenity_parts = explode('-', $amenity_slugs);
+            $amenityCacheKey = "amenity_data_" . md5(implode('_', $amenity_parts));
+            $amenityData = Cache::remember($amenityCacheKey, 86400, function () use ($amenity_parts) {
+                $ids = [];
+                $amenities = collect();
+                foreach ($amenity_parts as $part) {
+                    if (preg_match('/^a[a-z]+(\d+)$/', $part, $matches)) {
+                        $amenity_id = $matches[1];
+                        $amenity_info = DB::table('TPHotel_amenities')
+                            ->select('id', 'name', 'slug')
+                            ->where('id', $amenity_id)
+                            ->first();
+                        if ($amenity_info) {
+                            $ids[] = $amenity_id;
+                            $amenities->push($amenity_info);
+                        }
+                    }
                 }
-            }
-            return $ids;
-        });
-    }
+                return ['ids' => $ids, 'amenities' => $amenities];
+            });
+            $amenity_ids = $amenityData['ids'];
+            $amenity_info = $amenityData['amenities'];
+        }
 
     // Parse property type IDs
-    $propertyType_ids = [];
-    $propertyType_info = collect();
     if ($propertytype_slugs) {
         $propertyType_parts = explode('-', $propertytype_slugs);
-        
-        // Create a cache key based on the property type slugs
         $propertyTypeCacheKey = "propertyType_data_" . md5(implode('_', $propertyType_parts));
-        
-        
-        // Cache property type data for 24 hours (86400 seconds)
-        $propertyTypeData = Cache::remember($propertyTypeCacheKey, 86400, function() use ($propertyType_parts) {
+        $propertyTypeData = Cache::remember($propertyTypeCacheKey, 86400, function () use ($propertyType_parts) {
             $ids = [];
             $propertyTypes = collect();
-            
             foreach ($propertyType_parts as $part) {
                 if (preg_match('/^pt(\d+)$/', $part, $matches)) {
                     $propertyType_id = $matches[1];
-                    
                     $propertyType = DB::table('TPHotel_types')
                         ->select('hid', 'type', 'id')
                         ->where('hid', $propertyType_id)
                         ->first();
-                        
                     if ($propertyType) {
                         $ids[] = $propertyType_id;
                         $propertyTypes->push($propertyType);
                     }
                 }
             }
-            
-            return [
-                'ids' => $ids,
-                'propertyTypes' => $propertyTypes
-            ];
+            return ['ids' => $ids, 'propertyTypes' => $propertyTypes];
         });
-        
         $propertyType_ids = $propertyTypeData['ids'];
         $propertyType_info = $propertyTypeData['propertyTypes'];
-
+    } else {
+        $propertyType_ids = [];
+        $propertyType_info = collect();
     }
-    
+
     // Get hotel property types for the sidebar
     $hotelPropertyTypes = $this->getHotelPropertyTypes($id, $lslug);
-    
-    $neighborhood_ids = [];
-    $neighborhoods = collect();
+
     if ($neighborhood_slugs) {
         $neighborhood_parts = explode('-', $neighborhood_slugs);
-        
-        // Create a cache key based on the neighborhood slugs
         $neighborhoodCacheKey = "neighborhood_data_" . md5(implode('_', $neighborhood_parts));
-        
-        // Cache neighborhood data for 24 hours (86400 seconds)
-        $neighborhoodData = Cache::remember($neighborhoodCacheKey, 86400, function() use ($neighborhood_parts) {
+        $neighborhoodData = Cache::remember($neighborhoodCacheKey, 86400, function () use ($neighborhood_parts) {
             $ids = [];
             $neighborhoods = collect();
-            
             foreach ($neighborhood_parts as $part) {
                 if (preg_match('/^n[a-z]+(\d+)$/', $part, $matches)) {
                     $neighborhood_id = $matches[1];
-                    
                     $neighborhood = DB::table('Neighborhood')
                         ->select('NeighborhoodId', 'Name', 'LocationID', 'Latitude', 'Longitude')
                         ->where('NeighborhoodId', $neighborhood_id)
                         ->first();
-                        
                     if ($neighborhood) {
                         $ids[] = $neighborhood_id;
                         $neighborhoods->push($neighborhood);
                     }
                 }
             }
-            
-            return [
-                'ids' => $ids,
-                'neighborhoods' => $neighborhoods
-            ];
+            return ['ids' => $ids, 'neighborhoods' => $neighborhoods];
         });
-        
         $neighborhood_ids = $neighborhoodData['ids'];
         $neighborhoods = $neighborhoodData['neighborhoods'];
+    } else {
+        $neighborhood_ids = [];
+        $neighborhoods = collect();
     }
-    
-    $sight_hotel_ids = [];
-    $sights = collect();
+
     if ($sight_slugs) {
         $sight_parts = explode('-', $sight_slugs);
-        
-        // Create a cache key based on the sight slugs
         $sightCacheKey = "sight_data_" . md5(implode('_', $sight_parts));
-        
-        // Cache sight data for 24 hours (86400 seconds)
-        $sightData = Cache::remember($sightCacheKey, 86400, function() use ($sight_parts) {
+        $sightData = Cache::remember($sightCacheKey, 86400, function () use ($sight_parts) {
             $ids = [];
             $sights = collect();
-            
             foreach ($sight_parts as $part) {
                 if (preg_match('/^sqx(\d+)$/', $part, $matches)) {
                     $sight_id = $matches[1];
-                    
                     $sight = DB::table('Sight')
                         ->select('SightId', 'Title', 'LocationId', 'Latitude', 'Longitude')
                         ->where('SightId', $sight_id)
                         ->first();
-                        
                     if ($sight) {
                         $ids[] = $sight_id;
                         $sights->push($sight);
                     }
                 }
             }
-            
-            return [
-                'ids' => $ids,
-                'sights' => $sights
-            ];
+            return ['ids' => $ids, 'sights' => $sights];
         });
-        
         $sight_ids = $sightData['ids'];
         $sights = $sightData['sights'];
+    } else {
+        $sight_ids = [];
+        $sights = collect();
     }
     
         // Set the variables for the rest of the function
@@ -631,949 +336,10 @@ class HOSegmentController extends Controller
                     ->get();
             });
     
-            if( $chkin !="" && $checout !=""){
-                   session()->forget('filterd');
-                $pagetype="withdate";
-                $chkin = $this->formatDate($chkin);
-                $checout = $this->formatDate($checout);   
-                $getval =  $chkin .'_'. $checout;            
-                $rooms = $request->get('rooms'); 
-                $guest = $request->get('guest')  ?: 1; 
-                $slug = $segment; 
-                $locationid =  $request->get('locationid')?: $request->get('lid'); 
-                session([
-                    'checkin' => $getval,
-                    'rooms' => $rooms,
-                    'guest' => $guest,
-                    'slug' => $slug,
-                    'slugid'=>$locationid,
-                ]);         
-                $fullname = "";           
-                $tplocationid =$locationid;            
-                $getloclink = Cache::remember("location_mapping_{$locationid}", 3600, function() use ($locationid) {
-                    return DB::table('Temp_Mapping')
-                        ->select('LocationId', 'Tid','cityName','countryName','fullName')
-                        ->where('slugid', $locationid)
-                        ->first();
-                });
-      
-                // return   print_r($getloclink);
-                if ($getloclink) {
-                    $locationid = $getloclink->LocationId;
-                    $tplocationid = $locationid;   
-                    $Tid = $getloclink->Tid;
-                }              
-      
-      
-                $locationPatent =[];     
-              
-                $metadata = Cache::remember("metadata_{$slgid}", 86400, function() use ($slgid) {
-                    return DB::table('Location')
-                        ->select('HotelTitleTag','HotelMetaDescription','MetaTagTitle','MetaTagDescription')
-                        ->where('slugid', $slgid)
-                        ->get();
-                });
-                $gethoteltype = Cache::remember('hotel_types', 604800, function() {
-                    return DB::table('TPHotel_types')
-                        ->select('hid', 'name', 'slug')
-                        ->orderBy('hid', 'desc')
-                        ->get();
-                });
-              
-              //  $getloc = DB::table('TPLocations')->select('fullName','cityName','countryName')->where('id',$locationid)->first();
-      
-                if (!$getloclink) {
-                    abort(404, 'Not FOUND');
-                }       
-                if($fullname ==""){
-                    $fullname = $getloclink->fullName;
-                } 
-                $lname = $getloclink->cityName;
-                $countryName = $getloclink->countryName;
-          
-                $countryname  = $getloclink->countryName;
-    
-                $getloclink =collect();
-                $getcontlink =collect(); 
-      
-                //start session
-                $searchEntry = [
-                    'checkin' => $chkin,
-                    'checkout' => $checout,
-                    'rooms' => $rooms,
-                    'guest' => $guest,
-                    'slug' => $segment,
-                    'locationid' => $desiredId,
-                    'fullname' => $fullname,
-                ];   
-                $recentSearches = session('recent_searches', []);       
-                $exists = false;
-                foreach ($recentSearches as $entry) {
-                    if ($entry['locationid'] == $searchEntry['locationid']) {
-                        $exists = true;
-                        break;
-                    }
-                }            
-                if (!$exists) {
-                    $recentSearches[] = $searchEntry;          
-                    if (count($recentSearches) > 4) {
-                        $recentSearches = array_slice($recentSearches, -4);
-                    }
-                    session(['recent_searches' => $recentSearches]);
-                }
-                //  $end =  date("H:i:s");  
-                //  return $start.'=='.$end;
-                //end session
-      
-                //api code
-  $checkinDate =  $chkin;         
-                $checkoutDate = $checout;       
-                $adultsCount = $guest;              
-                $customerIP = '49.156.89.145'; 
-                $childrenCount = '1'; 
-                $chid_age = '10';
-                $lang = 'en'; 
-                $currency ='USD'; 
-                $waitForResult ='0'; 
-                $iata= $tplocationid;
-                $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869"; 
-                $TRAVEL_PAYOUT_MARKER = "299178"; 
-                $SignatureString = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$adultsCount.":". 
-                    $checkinDate.":". 
-                    $checkoutDate.":".
-                    $chid_age.":". 
-                    $childrenCount.":". 
-                    $iata.":".  
-                    $currency.":". 
-                    $customerIP.":".             
-                    $lang.":". 
-                    $waitForResult; 
-                $signature = md5($SignatureString);
-      
-                $url ='http://engine.hotellook.com/api/v2/search/start.json?cityId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;       
-
-                
-                $response = Http::withoutVerifying()->get($url);
-                
-      
-                if ($response->successful()) {
-                    $data = json_decode($response);
-                    if(!empty($data)){
-                        $searchId = $data->searchId; 
-                        $limit = 40;
-                        $offset=0;
-                        $roomsCount=0;
-                        $sortAsc=0;
-                        $sortBy='stars';
-                        $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
-                        $sig2 =  md5($SignatureString2); 
-                        $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=40&sortBy=stars&sortAsc=0&roomsCount=0&offset=0&marker=299178&signature='.$sig2;                    
-
-                        
-                        //new code  
-      
-                          $maxAttempts = 6; 
-                          $retryInterval = 2;
-                          $status = 0; // Default status
-      
-                          try {
-                              // Make the HTTP request with retries
-                              $response2 = Http::withoutVerifying()
-                                  ->timeout(0)
-                                  ->retry($maxAttempts, $retryInterval)
-                                  ->get($url2);
-
-                              
-                           
-                              $responseData = $response2->json();
-                              
-                          
-                              if (isset($responseData['errorCode']) && $responseData['errorCode'] === 4) {
-                                   $status = 4;
-                              } else {
-                                  $status = 1;
-                              }
-
-                              // If the status indicates a successful search
-                              if ($status == 1 && $response2->successful()) {
-
-                              $hotel = $response2->object();
-
-                              // Save raw hotel data to TPRoomtype for debugging
-                              if (isset($hotel->result) && is_array($hotel->result)) {
-                                  $hotelIdsFromApi = array_column($hotel->result, 'id');
-                              
-                                  // First, clear any old raw data for these hotels to avoid duplicates
-                                  if (!empty($hotelIdsFromApi)) {
-                                      DB::table('TPRoomtype')->whereIn('hotelid', $hotelIdsFromApi)->delete();
-                                  }
-                              
-                                  $rawDataToInsert = [];
-                                  foreach ($hotel->result as $hotelData) {
-                                      $rawDataToInsert[] = [
-                                          'hotelid' => $hotelData->id,
-                                          'Roomdesc' => json_encode($hotelData),
-                                          'flag' => 0,
-                                          'created_at' => now(),
-                                      ];
-                                  }
-                              
-                                  if (!empty($rawDataToInsert)) {
-                                      DB::table('TPRoomtype')->insert($rawDataToInsert);
-
-                                  }
-
-                                  // Now, process the staged data
-                                  $stagedHotels = DB::table('TPRoomtype')->whereIn('hotelid', $hotelIdsFromApi)->where('flag', 0)->get();
-                                  
-                
-                                  foreach ($stagedHotels as $stagedHotel) {
-                                      try {
-                                          $hotelData = json_decode($stagedHotel->Roomdesc);
-                
-                                          if (json_last_error() !== JSON_ERROR_NONE) {
-                                              continue; // Skip to next hotel
-                                          }
-                
-                                          if (is_null($hotelData)) {
-                                              continue;
-                                          }
-                
-
-                                          $roomsToInsert = [];
-                                          
-                                          if (isset($hotelData->rooms) && is_array($hotelData->rooms) && count($hotelData->rooms) > 0) {
-                                              foreach ($hotelData->rooms as $room) {
-                                                  $roomsToInsert[] = [
-                                                      'hotelid' => $hotelData->id,
-                                                      'roomType' => $room->roomName ?? $room->desc ?? $room->type ?? 'N/A',
-                                                      'price' => $room->price ?? 0,
-                                                      'refundable' => $room->options->refundable ?? 0,
-                                                      'halfBoard' => $room->options->halfBoard ?? 0,
-                                                      'ultraAllInclusive' => $room->options->ultraAllInclusive ?? 0,
-                                                      'allInclusive' => $room->options->allInclusive ?? 0,
-                                                      'freeWifi' => $room->options->freeWifi ?? 0,
-                                                      'fullBoard' => $room->options->fullBoard ?? 0,
-                                                      'deposit' => $room->options->deposit ?? 0,
-                                                      'cardRequired' => $room->options->cardRequired ?? 0,
-                                                      'breakfast' => $room->options->breakfast ?? 0,
-                                                      'smoking' => $room->options->smoking ?? 0,
-                                                      'viewSentence' => $room->options->viewSentence ?? '',
-                                                      'beds' => isset($room->options->beds) ? (is_object($room->options->beds) || is_array($room->options->beds) ? array_sum((array)$room->options->beds) : (int)$room->options->beds) : 0,
-                                                      'doublebed' => $room->options->doublebed ?? 0,
-                                                      'twin' => $room->options->twin ?? 0,
-                                                      'available' => $room->options->available ?? 0,
-                                                      'agencyId' => $room->agencyId ?? 0,
-                                                      'agencyName' => $room->agencyName ?? 'N/A',
-                                                      'booking_url' => isset($room->fullBookingURL) ? $room->fullBookingURL : '',
-                                                      'balcony' => 0, // Assuming not available from API
-                                                      'privateBathroom' => 1, // Assuming available
-                                                      'dt_created' => now(),
-                                                      'amenities' => 0, // Default value
-                                                      'view' => '',
-                                                      'roomtypeid' => 0
-                                                 ];
-                                           	 $roomPrices = [];
-												foreach ($rooms as $room) {
-   												$roomPrices[] = [
-        										'hotelid' => $hotelData->id,
-        										'roomtype' => $room->roomName ?? $room->desc ?? $room->type ?? 'N/A',
-       											'price' => $room->price ?? 0,
-        										'search_hash' => $search_hash,
-        										'checkin' => $chkin ?? null,
-        										'checkout' => $checout ?? null,
-        										'created_at' => now(),
-        										'updated_at' => now(),
-  											  ];
-											}
-											DB::table('RoomPrices')->insert($roomPrices);
-                                              }
-                                          } else {
-                                          }
-                
-                                          if (!empty($roomsToInsert)) {
-                                               
-                                               // Filter out any 'total' fields from the data to prevent SQL errors
-                                               $roomsToInsert = array_map(function($room) {
-                                                   if (isset($room['total'])) {
-                                                       unset($room['total']);
-                                                   }
-                                                   return $room;
-                                               }, $roomsToInsert);
-                                               
-                                               DB::table('TPRoomtype_tmp')->insert($roomsToInsert);
-                                              DB::table('TPRoomtype')->where('id', $stagedHotel->id)->update(['flag' => 1]);
-                                          } else {
-                                          }
-                                      } catch (\Exception $e) {
-                                      }
-                                  }
-
-                                  // Check if there are any unprocessed records before starting the second process
-                                  $unprocessedRecordsCount = DB::table('TPRoomtype')
-                                      ->whereIn('hotelid', $hotelIdsFromApi)
-                                      ->where('flag', 0)
-                                      ->count();
-                                  
-                                  // Only process if there are unprocessed records
-                                  if ($unprocessedRecordsCount > 0) {
-                                      // Now, process the data from TPRoomtype and insert into TPRoomtype_tmp
-                                  
-                                      $rawDataRecords = DB::table('TPRoomtype')
-                                          ->whereIn('hotelid', $hotelIdsFromApi)
-                                          ->where('flag', 0)
-                                          ->get();
-                                  
-                                      // Only delete and reinsert if we actually have unprocessed records
-                                      if (!empty($rawDataRecords) && $rawDataRecords->count() > 0) {
-                                          // Get the specific hotel IDs that have unprocessed records
-                                          $unprocessedHotelIds = $rawDataRecords->pluck('hotelid')->unique()->toArray();
-                                          
-                                          if (!empty($unprocessedHotelIds)) {
-                                              DB::table('TPRoomtype_tmp')->whereIn('hotelid', $unprocessedHotelIds)->delete();
-                                          }
-                                      } else {
-                                          $rawDataRecords = collect(); // Empty collection
-                                      }
-                                  } else {
-                                      $rawDataRecords = collect(); // Empty collection
-                                  }
-                              
-                                  $roomsToInsert = [];
-                                  foreach ($rawDataRecords as $record) {
-                                       try {
-                                           $hotelData = json_decode($record->Roomdesc);
-                                           $hotelId = $record->hotelid;
-                               
-                                           if (isset($hotelData->rooms) && is_array($hotelData->rooms)) {
-                                               foreach ($hotelData->rooms as $room) {
-                                                   // Process beds data to ensure it's an integer
-                                                   $bedsValue = 0;
-                                                   $doubleBedValue = 0;
-                                                   $twinValue = 0;
-                                                   
-                                                   if (isset($room->options->beds)) {
-                                                       if (is_object($room->options->beds)) {
-                                                           // Handle object format
-                                                           if (isset($room->options->beds->double)) {
-                                                               $doubleBedValue = (int)$room->options->beds->double;
-                                                           }
-                                                           if (isset($room->options->beds->twin)) {
-                                                               $twinValue = (int)$room->options->beds->twin;
-                                                           }
-                                                           $bedsValue = $doubleBedValue + $twinValue;
-                                                       } elseif (is_array($room->options->beds)) {
-                                                           // Handle array format
-                                                           $bedsValue = array_sum((array)$room->options->beds);
-                                                       } else {
-                                                           // Handle scalar value
-                                                           $bedsValue = (int)$room->options->beds;
-                                                       }
-                                                   }
-                                                   
-                                                   $roomsToInsert[] = [
-                                                       'hotelid' => $hotelId,
-                                                       'roomType' => $room->roomName ?? $room->desc ?? 'N/A',
-                                                       'roomtypeid' => $room->internalTypeId ?? 0,
-                                                       'breakfast' => isset($room->options->breakfast) ? (int)$room->options->breakfast : 0,
-                                                       'available' => $room->options->available ?? 1,
-                                                       'halfBoard' => isset($room->options->halfBoard) ? (int)$room->options->halfBoard : 0,
-                                                       'ultraAllInclusive' => isset($room->options->ultraAllInclusive) ? (int)$room->options->ultraAllInclusive : 0,
-                                                       'allInclusive' => isset($room->options->allInclusive) ? (int)$room->options->allInclusive : 0,
-                                                       'refundable' => isset($room->options->refundable) ? (int)$room->options->refundable : 0,
-                                                       'freeWifi' => isset($room->options->freeWifi) ? (int)$room->options->freeWifi : 1,
-                                                       'fullBoard' => isset($room->options->fullBoard) ? (int)$room->options->fullBoard : 0,
-                                                       'deposit' => isset($room->options->deposit) ? (int)$room->options->deposit : 0,
-                                                       'smoking' => isset($room->options->smoking) ? (int)$room->options->smoking : 0,
-                                                       'view' => $room->options->view ?? '',
-                                                       'viewSentence' => $room->options->viewSentence ?? '',
-                                                       'cardRequired' => isset($room->options->cardRequired) ? (int)$room->options->cardRequired : 0,
-                                                       'beds' => $bedsValue,
-                                                       'doublebed' => $doubleBedValue,
-                                                       'twin' => $twinValue,
-                                                       'balcony' => isset($room->options->balcony) ? (int)$room->options->balcony : 0,
-                                                       'privateBathroom' => isset($room->options->privateBathroom) ? (int)$room->options->privateBathroom : 1,
-                                                       'dt_created' => now(),
-                                                       'images' => $room->images ?? '',
-                                                       'price' => $room->price ?? 0,
-                                                       'agencyId' => $room->agencyId ?? 0,
-                                                       'agencyName' => $room->agencyName ?? '',
-                                                       'amenities' => $room->amenities ?? 0,
-                                                       'booking_url' => $room->bookingURL ?? '',
-                                                   ];
-                                               }
-                                           }
-                                       } catch (\Exception $e) {
-                                           continue;
-                                       }
-                                   }
-                                  if (!empty($roomsToInsert)) {
-                                       try {
-                                           // Filter out any 'total' fields from the data to prevent SQL errors
-                                            $roomsToInsert = array_map(function($room) {
-                                                if (isset($room['total'])) {
-                                                    unset($room['total']);
-                                                }
-                                                return $room;
-                                            }, $roomsToInsert);
-                                            
-                                            // Insert rooms in smaller batches to avoid potential issues
-                                           $chunks = array_chunk($roomsToInsert, 50);
-                                           foreach ($chunks as $chunk) {
-                                               DB::table('TPRoomtype_tmp')->insert($chunk);
-                                           }
-                                           
-
-                                           
-                                           // Update the flag for processed records
-                                           $processedIds = array_column($rawDataRecords->all(), 'id');
-                                           DB::table('TPRoomtype')->whereIn('id', $processedIds)->update(['flag' => 1]);
-                                       } catch (\Exception $e) {
-                                       }
-                                   } else {
-                                  }
-                              } //start agency code
-                              $agencyData = [];
-                              if (isset($hotel->result) && is_array($hotel->result)) {
-                                  foreach ($hotel->result as $hotelData) {
-                                      if (isset($hotelData->rooms) && is_array($hotelData->rooms)) {
-                                          foreach ($hotelData->rooms as $room) {
-                                              $agencyName = $room->agencyName;
-                                          
-                                              if (!in_array($agencyName, $agencyData)) {
-                                                  $agencyData[] = $agencyName;
-                                              }
-                                          }
-                                      }
-                                  }
-                              }
-                               //end agency code
-        
-                              $idArray = array_column($hotel->result, 'id');         
-                              $idArray = array_filter($idArray, function ($ids) {
-                                  return isset($ids);
-                              });  
-                              $idArray = array_unique($idArray);  
-                              
-                              $cacheKey = "hotel_search_" . md5(implode('_', $idArray));
-        
-                              $searchresults = Cache::remember($cacheKey, 300, function() use ($idArray) {
-                                  return DB::table('TPHotel as h')
-                                      ->select([
-                                          'h.hotelid',
-                                          'h.id', 
-                                          'h.name', 
-                                          'h.slug',
-                                          'h.stars',
-                                          'h.rating', 
-                                          'h.amenities', 
-                                          'h.distance',
-                                          'h.slugid',
-                                          'h.room_aminities',
-                                          'h.CityName',
-                                          'h.short_description',
-                                          'h.Latitude',
-                                          'h.longnitude',
-                                          'h.MicroSummary',
-                                          DB::raw('GROUP_CONCAT(
-                                              DISTINCT CONCAT(a.shortName, "|", COALESCE(a.image, "")) 
-                                              ORDER BY a.name 
-                                              SEPARATOR ", "
-                                          ) as amenity_info')
-                                      ])
-                                      ->leftJoin('TPHotel_amenities as a', function($join) {
-                                          $join->whereRaw('FIND_IN_SET(a.id, h.shortFacilities) > 0');
-                                      })
-                                      ->whereIn('h.hotelid', $idArray)
-                                      ->whereNotNull('h.slugid')
-                                      ->groupBy([
-                                          'h.hotelid',
-                                          'h.id', 
-                                          'h.name', 
-                                          'h.slug',
-                                          'h.stars',
-                                          'h.rating', 
-                                          'h.amenities', 
-                                          'h.distance',
-                                          'h.slugid',
-                                          'h.room_aminities',
-                                          'h.CityName',
-                                          'h.short_description',
-                                          'h.Latitude',
-                                          'h.longnitude',
-                                          'h.MicroSummary'
-                                      ])
-                                      ->orderBy('h.stars', 'desc')
-                                      ->get();
-                              });
-                          
-                              // Transform the results if needed
-                              $searchresults = $searchresults->map(function($hotel) {
-                                  $hotel->amenity_info = !empty($hotel->amenity_info) 
-                                      ? $hotel->amenity_info 
-                                      : '';
-                                  return $hotel;
-                              });
-                          
-                              
-                              $count_result = count($searchresults);
-                           }   
-                          
-                      } catch (\Exception $e) {
-                              
-                              $searchresults =collect();
-                      }
-      
-                           
-                        
-                        
-                       // end new code
-      
-                    }
-      
-                } else {
-      
-                    //  return 2;
-                }
-                
-                    /*breadcrumb*/
-                $breadcrumbCacheKey = "breadcrumb_data_{$desiredId}";
-                $breadcrumbData = Cache::remember($breadcrumbCacheKey, 86400, function() use ($desiredId) {
-                    $result = [
-                        'getloclink' => collect(),
-                        'getcontlink' => collect(),
-                        'locationPatent' => [],
-                        'getlocationexp' => collect(),
-                        'lslug' => '',
-                        'lslugid' => ''
-                    ];
-                    
-                    // Get location info
-                    $locInfo = DB::table('Location as l')         
-                        ->select('l.LocationLevel', 'l.ParentId', 'l.LocationId', 'l.Slug', 'l.slugid', 'l.heading', 'l.Name', 'l.CountryId')
-                        ->where('l.slugid', $desiredId)
-                        ->first();
-                    
-                    if ($locInfo) {
-                        $result['getloclink'] = collect([$locInfo]);
-                        $result['lslug'] = $locInfo->Slug;
-                        $result['lslugid'] = $locInfo->slugid;
-                        
-                        // Get country info
-                        $result['getcontlink'] = DB::table('Country as co')
-                            ->join('Location as l', 'l.CountryId', '=', 'co.CountryId')
-                            ->join('CountryCollaboration as cont', 'cont.CountryCollaborationId', '=', 'co.CountryCollaborationId')
-                            ->select('co.CountryId', 'co.Name', 'co.slug', 'cont.Name as cName', 'cont.CountryCollaborationId as contid')
-                            ->where('l.LocationId', $locInfo->LocationId)
-                            ->get();
-                        
-                        // Get location details
-                        $result['getlocationexp'] = DB::table('Location')
-                            ->select('slugid', 'LocationId', 'Name', 'Slug')
-                            ->where('LocationId', $locInfo->LocationId)
-                            ->get();
-                        
-                        // Build location parent hierarchy
-                        if ($locInfo->LocationLevel != 1) {
-                            $loopcount = $locInfo->LocationLevel;
-                            $lociID = $locInfo->ParentId;
-                            
-                            for ($i = 1; $i < $loopcount; $i++) {
-                                $getparents = DB::table('Location')
-                                    ->select('slugid', 'LocationId', 'Name', 'Slug', 'ParentId')
-                                    ->where('LocationId', $lociID)
-                                    ->first();
-                                    
-                                if ($getparents) {
-                                    $result['locationPatent'][] = [
-                                        'LocationId' => $getparents->slugid,
-                                        'slug' => $getparents->Slug,
-                                        'Name' => $getparents->Name,
-                                    ];
-                                    
-                                    if ($getparents->ParentId != "") {
-                                        $lociID = $getparents->ParentId;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    return $result;
-                });
-                
-                
-                // Set variables from cached data
-                $getloclink = $breadcrumbData['getloclink'];
-                $getcontlink = $breadcrumbData['getcontlink'];
-                $locationPatent = $breadcrumbData['locationPatent'];
-                $getlocationexp = $breadcrumbData['getlocationexp'];
-                $lslug = $breadcrumbData['lslug'];
-                $lslugid = $breadcrumbData['lslugid'];
-    
-                $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$desiredId}", 86400, function() use ($desiredId) {
-                    return DB::table('TPHotel as h')
-                        ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug', 
-                                 'h.OverviewShortDesc', 'h.rating', 'h.pricefrom', 'l.Name as Lname')
-                        ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
-                        ->whereExists(function($query) {
-                            $query->select(DB::raw(1))
-                                ->from('TPHotel_amenities as ha')
-                                ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
-                                ->where('ha.name', 'Swimming pool');
-                        })
-                        ->where('h.slugid', $desiredId)
-                        ->whereNotNull('h.OverviewShortDesc')
-                        ->orderBy('h.stars', 'desc')
-                        ->limit(4)
-                        ->get();
-                });
-                /*breadcrumb*/
-      
-            }else{
-                $pagetype="withoutdate";     
-                $getloc = DB::table('Temp_Mapping as tm')  
-                    // ->leftjoin('TPLocations as l', 'l.id', '=', 'tm.LocationId')   
-                    // ,'l.location'
-                    ->select('tm.LocationId','tm.cityName','tm.countryName')
-                    ->where('tm.slugid', $desiredId)
-                    ->where('tm.slug', $slug)
-                    ->limit(1)	  
-                    ->get();
-      
-                if($getloc->isEmpty()){
-                    if($id){
-                        $checkgetloc = DB::table('Temp_Mapping as tm')       
-                            ->select('tm.slugid','tm.slug')
-                            ->where('tm.Tid', $id)   
-                            ->limit(1)      
-                            ->get();        
-                        if(!$checkgetloc->isEmpty()){    
-                            $id =  $checkgetloc[0]->slugid;
-                            $slug = $checkgetloc[0]->slug; 
-                            return redirect()->route('hotel.list', [$id.'-'.$slug]);
-                        }
-                        // Redirect to the new URL
-                        $checkgetloc2 = DB::table('Temp_Mapping as tm')              
-                            ->select('tm.slugid','tm.slug')
-                            ->where('tm.LocationId', $id)
-                            ->get(); 
-                        if(!$checkgetloc2->isEmpty()){    
-                            $id =  $checkgetloc2[0]->slugid;
-                            $slug = $checkgetloc[0]->slug;                
-                            return redirect()->route('hotel.list', [$id.'-'.$slug]);
-                        }
-      
-                    }
-                    abort(404,'Not found');
-                }
-                if(!$getloc->isEmpty()){    
-                    $desiredId =  $getloc[0]->LocationId;
-                    $lname = $getloc[0]->cityName;
-                    $countryname = $getloc[0]->countryName;
-                }
-      
-                $locationid =  $desiredId;
-      
-      
-                // header searchbar link 
-                $hlid =$desiredId;   
-      
-                $locationgeo ="";
-      
-               
-      
-                $gethoteltype = Cache::remember('hotel_types', 604800, function() {
-                    return DB::table('TPHotel_types')
-                        ->orderBy('hid', 'desc')
-                        ->get();
-                });
-      
-      
-                $getloclink =collect();
-      
-      
-                $getloclink = DB::table('Temp_Mapping as tm')
-                    ->join('Location as l', 'l.LocationId', '=', 'tm.Tid')
-                    ->select('l.LocationLevel','l.ParentId','l.LocationId','l.Slug','tm.Tid')
-                    ->where('tm.LocationId', $desiredId)
-                    ->limit(1)
-                    ->get();
-      
-      
-                $getcontlink =collect();
-      
-                $getcontlink = DB::table('Country as co')
-                    ->join('Location as l', 'l.CountryId', '=', 'co.CountryId')
-                    ->join('CountryCollaboration as cont','cont.CountryCollaborationId','=','co.CountryCollaborationId')
-                    ->select('co.CountryId','co.Name','co.slug','cont.Name as cName','cont.CountryCollaborationId as contid')
-                    ->where('l.LocationId', $getloclink[0]->LocationId)
-                    ->get();
-      
-      
-      
-      
-                $locationPatent = [];
-                if(!$getloclink->isEmpty()){
-                    $Tid = $getloclink[0]->Tid;
-                    $locationid = $getloclink[0]->LocationId;
-                    $getlocationexp = DB::table('Location')->select('slugid','LocationId','Name','Slug')->where('LocationId', $locationid)->get();
-      
-                    if (!$getloclink->isEmpty() &&  $getloclink[0]->LocationLevel != 1) {
-                        $loopcount =  $getloclink[0]->LocationLevel;
-      
-                        $lociID = $getloclink[0]->ParentId;
-                        for ($i = 1; $i < $loopcount; $i++) {
-                            $getparents = DB::table('Location')->select('slugid','LocationId','Name','Slug','ParentId')->where('LocationId', $lociID)->get();
-                            if (!empty($getparents)) {
-                                $locationPatent[] = [
-                                    'LocationId' => $getparents[0]->slugid,
-                                    'slug' => $getparents[0]->Slug,
-                                    'Name' => $getparents[0]->Name,
-                                ];
-                                if (!empty($getparents) && $getparents[0]->ParentId != "") {
-                                    $lociID = $getparents[0]->ParentId;
-                                }
-                            } else {
-                                break; 
-                            }
-                        }
-                    }
-                }
-      
-      
-             $metadata = DB::table('Location')->select('HotelTitleTag','HotelMetaDescription','MetaTagTitle','MetaTagDescription')->where('slugid', $slgid)->get();
-                
-             // Add this at the start of your function to initialize
-                $searchresults = collect();
-    
-                // Then in your code where the search results query is:
-                try {
-                    // Create a more specific cache key that includes all filter parameters
-                    $cacheKey = "search_results_" . md5(
-                        $slgid . '_' . 
-                        $st . '_' . 
-                        $amenity . '_' . 
-                        $price . '_' . 
-                        $reviewscore . '_' . 
-                        implode('_', $amenity_ids ?? []) . '_' . 
-                        implode('_', $neighborhood_ids ?? []) . '_' .
-                        implode('_', $propertyType_ids ?? [])
-                    );
-                    
-                    // Extend cache duration from 300 to 1800 seconds (30 minutes) for better performance
-                    $searchresults = Cache::remember($cacheKey, 1800, function() use ($slgid, $st, $amenity, $price, $reviewscore, $amenity_ids, $neighborhood_ids, $propertyType_ids) {
-                        $query = DB::table('TPHotel as h')
-                            ->select([
-                                'h.hotelid', 
-                                'h.id', 
-                                'h.name', 
-                                'h.slug', 
-                                'h.stars', 
-                                'h.pricefrom', 
-                                'h.rating', 
-                                'h.amenities', 
-                                'h.distance', 
-                                'h.image', 		
-                                'h.about', 
-                                'h.room_aminities', 
-                                'h.shortFacilities', 
-                                'h.slugid', 
-                                'h.CityName',
-                                'h.short_description',
-                                'h.ReviewSummary',
-                                'h.Latitude',
-                                'h.longnitude',
-                                'h.OverviewShortDesc',
-                                DB::raw('GROUP_CONCAT(
-                                    DISTINCT CONCAT(a.shortName, "|", a.image) 
-                                    ORDER BY a.name 
-                                    SEPARATOR ", "
-                                ) as amenity_info')
-                            ])
-                            ->leftJoin('TPHotel_amenities as a', function($join) {
-                                $join->whereRaw('FIND_IN_SET(a.id, h.facilities)');
-                            });
-    
-                            // Apply base conditions only once
-                            $query->where('h.slugid', $slgid)
-                                ->whereNotNull('h.slugid');
-    
-                            // Add conditional join for specific amenities - moved up to avoid multiple joins
-                            if ($amenity == 'free cancellation' || $amenity == 'breakfast') {
-                                $query->leftJoin('TPRoomtype_tmp as rt', 'h.hotelid', '=', 'rt.hotelid');
-                            }
-    
-                            if (!empty($sights)) {
-                                $query->where(function($query) use ($sights) {
-                                    foreach ($sights as $sight) {
-                                        $query->orWhere(function($q) use ($sight) {
-                                            $q->whereRaw('
-                                                ROUND(
-                                                    111.045 * SQRT(
-                                                        POWER(ABS(CAST(h.Latitude AS DECIMAL(10,6)) - ?), 2) +
-                                                        POWER(
-                                                            ABS(CAST(h.longnitude AS DECIMAL(10,6)) - ?) * 
-                                                            COS(RADIANS(?)), 
-                                                            2
-                                                        )
-                                                    ), 2
-                                                ) <= ?', 
-                                                [
-                                                    (float)$sight->Latitude,
-                                                    (float)$sight->Longitude,
-                                                    (float)$sight->Latitude,
-                                                    3 // 3 km radius
-                                                ]
-                                            )
-                                            ->where('h.LocationId', $sight->LocationId)
-                                            ->whereNotNull('h.Latitude')
-                                            ->whereNotNull('h.longnitude')
-                                            ->whereRaw('TRIM(h.Latitude) != ""')
-                                            ->whereRaw('TRIM(h.longnitude) != ""');
-                                        });
-                                    }
-                                });
-                            }
-    
-                            if (!empty($amenity_ids)) {
-                                $query->where(function($query) use ($amenity_ids) {
-                                    foreach ($amenity_ids as $amenity_id) {
-                                        $query->whereRaw("FIND_IN_SET(?, h.facilities)", [$amenity_id]);
-                                    }
-                                });
-                            }
-    
-                            if (!empty($propertyType_ids)) {
-                                $query->whereIn('h.propertyType', $propertyType_ids);
-                            }
-
-                            if (!empty($neighborhoods)) {
-                                $query->where(function($query) use ($neighborhoods) {
-                                    foreach ($neighborhoods as $neighborhood) {
-                                        $query->orWhere(function($q) use ($neighborhood) {
-                                            $q->whereRaw('
-                                                ROUND(
-                                                    111.045 * SQRT(
-                                                        POWER(ABS(CAST(h.Latitude AS DECIMAL(10,6)) - ?), 2) +
-                                                        POWER(
-                                                            ABS(CAST(h.longnitude AS DECIMAL(10,6)) - ?) * 
-                                                            COS(RADIANS(?)), 
-                                                            2
-                                                        )
-                                                    ), 2
-                                                ) <= ?', 
-                                                [
-                                                    (float)$neighborhood->Latitude,
-                                                    (float)$neighborhood->Longitude,
-                                                    (float)$neighborhood->Latitude,
-                                                    2 // 2 km radius
-                                                ]
-                                            )
-                                            ->where('h.LocationId', $neighborhood->LocationId)
-                                            ->whereNotNull('h.Latitude')
-                                            ->whereNotNull('h.longnitude')
-                                            ->whereRaw('TRIM(h.Latitude) != ""')
-                                            ->whereRaw('TRIM(h.longnitude) != ""');
-                                        });
-                                    }
-                                });
-                            }
-    
-                            // Apply star rating filter
-                            if (!empty($st)) {
-                                $query->where('h.stars', $st);
-                            }
-    
-                            // Apply amenity filters
-                            if (!empty($amenity)) {
-                                if ($amenity == 'parking' || $amenity == 'wifi') {
-                                    $query->whereExists(function($subquery) use ($amenity) {
-                                        $subquery->select(DB::raw(1))
-                                            ->from('TPHotel_amenities as a2')
-                                            ->whereRaw('FIND_IN_SET(a2.id, h.facilities)')
-                                            ->where(function($q) use ($amenity) {
-                                                $q->where('a2.name', 'LIKE', "%{$amenity}%")
-                                                ->orWhere('a2.name', 'LIKE', "% {$amenity}%")
-                                                ->orWhere('a2.name', 'LIKE', "%{$amenity} %");
-                                            });
-                                    });
-                                } elseif ($amenity == 'free cancellation') {
-                                    $query->where('rt.refundable', 1);
-                                } elseif ($amenity == 'breakfast') {
-                                    $query->where('rt.breakfast', 1);
-                                }
-                            }
-    
-                            // Apply review score filter
-                            if (!empty($reviewscore)) {
-                                $query->whereNotNull('h.rating')
-                                    ->where('h.rating', '>=', $reviewscore);
-                            }
-    
-                            // Apply price filter
-                            if (!empty($price)) {
-                                $query->where('h.pricefrom', '<=', (int)trim($price));
-                            }
-    
-                            return $query->orderBy('h.stars', 'desc')  // Add this line for default star sorting
-                            ->orderBy(DB::raw('h.short_description IS NULL'), 'asc')
-                            ->groupBy([
-                                'h.hotelid', 
-                                'h.id', 
-                                'h.name', 
-                                'h.slug',
-                                'h.stars',
-                                'h.pricefrom', 
-                                'h.rating', 
-                                'h.amenities', 
-                                'h.distance',
-                                'h.image', 
-                                'h.about', 
-                                'h.room_aminities',
-                                'h.shortFacilities',
-                                'h.slugid', 
-                                'h.CityName',
-                                'h.short_description',
-                                'h.ReviewSummary',
-                                'h.Latitude',
-                                'h.longnitude',
-                                'h.OverviewShortDesc'
-                            ])
-                            ->limit(20)
-                            ->get();
-                    });
-    
-                    $count_result = $searchresults->count();
-    
-                } catch (\Exception $e) {
-                   
-                }
-          //nearby hotels with swimming pool
-            
-                $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$slgid}", 86400, function() use ($slgid) {
-                    return DB::table('TPHotel as h')
-                        ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug', 
-                                 'h.OverviewShortDesc','h.rating','h.pricefrom','l.Name as Lname')
-                        ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
-                        ->whereExists(function($query) {
-                            $query->select(DB::raw(1))
-                                ->from('TPHotel_amenities as ha')
-                                ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
-                                ->where('ha.name', 'Swimming pool');
-                        })
-                        ->where('h.slugid', $slgid)
-                        ->whereNotNull('h.OverviewShortDesc')
-                        ->orderBy('h.stars', 'desc')
-                        ->limit(4)
-                        ->get();
-                });
-    
-            //end nearby hotels with swimming pool
-    
-      
+            if ($chkin != "" && $checout != "") {
+                list($searchresults, $hotel, $agencyData, $count_result) = $this->handleWithDate($request, $segment, $id, $slgid);
+            } else {
+                list($searchresults, $hotel, $agencyData, $count_result) = $this->handleWithoutDate($slgid, $st, $amenity, $price, $reviewscore, $amenity_ids, $neighborhood_ids, $propertyType_ids, $sights, $neighborhoods);
             }
       
             if (!empty($amenity_ids)) {
@@ -1795,6 +561,68 @@ class HOSegmentController extends Controller
                 ->with('hotelPropertyTypes', $hotelPropertyTypes); 
         }
 
+    private function parseSegment($segment)
+    {
+        $parts = explode('-', $segment);
+        $id = array_shift($parts);
+
+        $filters = [
+            'st' => null,
+            'rs' => null,
+            'price' => null,
+            'amenities' => [],
+            'amenity_slugs' => null,
+            'neighborhoods' => [],
+            'neighborhood_slugs' => null,
+            'propertyTypes' => [],
+            'propertyType_slugs' => null,
+            'sights' => [],
+            'sight_slugs' => null,
+            'slug' => null,
+        ];
+
+        $slug_parts = [];
+        $redirect_needed = false;
+        $current_part_type = null;
+
+        foreach ($parts as $part) {
+            if (preg_match('/^st(\d+)$/', $part, $matches)) {
+                $filters['st'] = $matches[1];
+                $current_part_type = 'st';
+            } elseif (preg_match('/^rs(\d+)$/', $part, $matches)) {
+                $filters['rs'] = $matches[1];
+                $current_part_type = 'rs';
+            } elseif (preg_match('/^price(\d+)$/', $part, $matches)) {
+                $filters['price'] = $matches[1];
+                $current_part_type = 'price';
+            } elseif (preg_match('/^a[a-z]+(\d+)$/', $part, $matches)) {
+                $filters['amenities'][] = $matches[1];
+                $filters['amenity_slugs'] = ($filters['amenity_slugs'] ? $filters['amenity_slugs'] . '-' : '') . $part;
+                $current_part_type = 'amenity';
+            } elseif (preg_match('/^n[a-z]+(\d+)$/', $part, $matches)) {
+                $filters['neighborhoods'][] = $matches[1];
+                $filters['neighborhood_slugs'] = ($filters['neighborhood_slugs'] ? $filters['neighborhood_slugs'] . '-' : '') . $part;
+                $current_part_type = 'neighborhood';
+            } elseif (preg_match('/^pt(\d+)$/', $part, $matches)) {
+                $filters['propertyTypes'][] = $matches[1];
+                $filters['propertyType_slugs'] = ($filters['propertyType_slugs'] ? $filters['propertyType_slugs'] . '-' : '') . $part;
+                $current_part_type = 'propertyType';
+            } elseif (preg_match('/^sqx(\d+)$/', $part, $matches)) {
+                $filters['sights'][] = $matches[1];
+                $filters['sight_slugs'] = ($filters['sight_slugs'] ? $filters['sight_slugs'] . '-' : '') . $part;
+                $current_part_type = 'sight';
+            } elseif (!in_array($current_part_type, ['amenity', 'neighborhood', 'propertyType', 'sight'])) {
+                $slug_parts[] = $part;
+            } else {
+                // This part is a slug for a filter, so we reset the current part type
+                $current_part_type = null;
+            }
+        }
+
+        $filters['slug'] = implode('-', $slug_parts);
+
+        return [$id, $filters, $redirect_needed];
+    }
         private function getHotelPropertyTypes($locationId, $locationSlug)
         {
             // Create a cache key for this location's property types
@@ -2143,6 +971,767 @@ class HOSegmentController extends Controller
         return $result;
     }
 
+    private function handleWithDate(Request $request, $segment, $id, $slgid)
+    {
+        $chkin = $request->get('checkin');
+        $checout = $request->get('checkout');
+        session()->forget('filterd');
+        $pagetype = "withdate";
+        $chkin = $this->formatDate($chkin);
+        $checout = $this->formatDate($checout);
+        $getval = $chkin . '_' . $checout;
+        $rooms = $request->get('rooms');
+        $guest = $request->get('guest') ?: 1;
+        $slug = $segment;
+        $locationid = $request->get('locationid') ?: $request->get('lid');
+        session([
+            'checkin' => $getval,
+            'rooms' => $rooms,
+            'guest' => $guest,
+            'slug' => $slug,
+            'slugid' => $locationid,
+        ]);
+        $fullname = "";
+        $tplocationid = $locationid;
+        $getloclink = Cache::remember("location_mapping_{$locationid}", 3600, function () use ($locationid) {
+            return DB::table('Temp_Mapping')
+                ->select('LocationId', 'Tid', 'cityName', 'countryName', 'fullName')
+                ->where('slugid', $locationid)
+                ->first();
+        });
+
+        if ($getloclink) {
+            $locationid = $getloclink->LocationId;
+            $tplocationid = $locationid;
+            $Tid = $getloclink->Tid;
+        }
+
+        $locationPatent = [];
+
+        $metadata = Cache::remember("metadata_{$slgid}", 86400, function () use ($slgid) {
+            return DB::table('Location')
+                ->select('HotelTitleTag', 'HotelMetaDescription', 'MetaTagTitle', 'MetaTagDescription')
+                ->where('slugid', $slgid)
+                ->get();
+        });
+        $gethoteltype = Cache::remember('hotel_types', 604800, function () {
+            return DB::table('TPHotel_types')
+                ->select('hid', 'name', 'slug')
+                ->orderBy('hid', 'desc')
+                ->get();
+        });
+
+        if (!$getloclink) {
+            abort(404, 'Not FOUND');
+        }
+        if ($fullname == "") {
+            $fullname = $getloclink->fullName;
+        }
+        $lname = $getloclink->cityName;
+        $countryName = $getloclink->countryName;
+
+        $countryname = $getloclink->countryName;
+
+        $getloclink = collect();
+        $getcontlink = collect();
+
+        //start session
+        $searchEntry = [
+            'checkin' => $chkin,
+            'checkout' => $checout,
+            'rooms' => $rooms,
+            'guest' => $guest,
+            'slug' => $segment,
+            'locationid' => $id,
+            'fullname' => $fullname,
+        ];
+        $recentSearches = session('recent_searches', []);
+        $exists = false;
+        foreach ($recentSearches as $entry) {
+            if ($entry['locationid'] == $searchEntry['locationid']) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            $recentSearches[] = $searchEntry;
+            if (count($recentSearches) > 4) {
+                $recentSearches = array_slice($recentSearches, -4);
+            }
+            session(['recent_searches' => $recentSearches]);
+        }
+        //end session
+
+        //api code
+        $checkinDate = $chkin;
+        $checkoutDate = $checout;
+        $adultsCount = $guest;
+        $customerIP = '49.156.89.145';
+        $childrenCount = '1';
+        $chid_age = '10';
+        $lang = 'en';
+        $currency = 'USD';
+        $waitForResult = '0';
+        $iata = $tplocationid;
+        $TRAVEL_PAYOUT_TOKEN = "27bde6e1d4b86710997b1fd75be0d869";
+        $TRAVEL_PAYOUT_MARKER = "299178";
+        $SignatureString = "" . $TRAVEL_PAYOUT_TOKEN . ":" . $TRAVEL_PAYOUT_MARKER . ":" . $adultsCount . ":" .
+            $checkinDate . ":" .
+            $checkoutDate . ":" .
+            $chid_age . ":" .
+            $childrenCount . ":" .
+            $iata . ":" .
+            $currency . ":" .
+            $customerIP . ":" .
+            $lang . ":" .
+            $waitForResult;
+        $signature = md5($SignatureString);
+
+        $url = 'http://engine.hotellook.com/api/v2/search/start.json?cityId=' . $iata . '&checkIn=' . $checkinDate . '&checkOut=' . $checkoutDate . '&adultsCount=' . $adultsCount . '&customerIP=' . $customerIP . '&childrenCount=' . $childrenCount . '&childAge1=' . $chid_age . '&lang=' . $lang . '&currency=' . $currency . '&waitForResult=' . $waitForResult . '&marker=299178&signature=' . $signature;
+
+
+        $searchCacheKey = 'hotellook_search_start_' . md5($url);
+        $response = Cache::remember($searchCacheKey, 3600, function () use ($url) {
+            return Http::withoutVerifying()->get($url);
+        });
+
+        if ($response->successful()) {
+            $data = json_decode($response);
+            if (!empty($data)) {
+                $searchId = $data->searchId;
+                $limit = 40;
+                $offset = 0;
+                $roomsCount = 0;
+                $sortAsc = 0;
+                $sortBy = 'stars';
+                $SignatureString2 = "" . $TRAVEL_PAYOUT_TOKEN . ":" . $TRAVEL_PAYOUT_MARKER . ":" . $limit . ":" . $offset . ":" . $roomsCount . ":" . $searchId . ":" . $sortAsc . ":" . $sortBy;
+                $sig2 = md5($SignatureString2);
+                $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId=' . $searchId . '&limit=40&sortBy=stars&sortAsc=0&roomsCount=0&offset=0&marker=299178&signature=' . $sig2;
+
+
+                //new code
+
+                $maxAttempts = 6;
+                $retryInterval = 2;
+                $status = 0; // Default status
+
+                try {
+                    // Make the HTTP request with retries
+                    $getResultCacheKey = 'hotellook_get_result_' . md5($url2);
+                    $response2 = Cache::remember($getResultCacheKey, 3600, function () use ($url2, $maxAttempts, $retryInterval) {
+                        return Http::withoutVerifying()
+                            ->timeout(0)
+                            ->retry($maxAttempts, $retryInterval)
+                            ->get($url2);
+                    });
+
+
+                    $responseData = $response2->json();
+
+
+                    if (isset($responseData['errorCode']) && $responseData['errorCode'] === 4) {
+                        $status = 4;
+                    } else {
+                        $status = 1;
+                    }
+
+                    // If the status indicates a successful search
+                    if ($status == 1 && $response2->successful()) {
+
+                        $hotel = $response2->object();
+
+                        // Save raw hotel data to TPRoomtype for debugging
+                        if (isset($hotel->result) && is_array($hotel->result)) {
+                            $hotelIdsFromApi = array_column($hotel->result, 'id');
+
+                            // First, clear any old raw data for these hotels to avoid duplicates
+                            if (!empty($hotelIdsFromApi)) {
+                                DB::table('TPRoomtype')->whereIn('hotelid', $hotelIdsFromApi)->delete();
+                            }
+
+                            $rawDataToInsert = [];
+                            foreach ($hotel->result as $hotelData) {
+                                $rawDataToInsert[] = [
+                                    'hotelid' => $hotelData->id,
+                                    'Roomdesc' => json_encode($hotelData),
+                                    'flag' => 0,
+                                    'created_at' => now(),
+                                ];
+                            }
+
+                            if (!empty($rawDataToInsert)) {
+                                DB::table('TPRoomtype')->insert($rawDataToInsert);
+
+                            }
+
+                            // Now, process the staged data
+                            $stagedHotels = DB::table('TPRoomtype')->whereIn('hotelid', $hotelIdsFromApi)->where('flag', 0)->get();
+
+
+                            foreach ($stagedHotels as $stagedHotel) {
+                                try {
+                                    $hotelData = json_decode($stagedHotel->Roomdesc);
+
+                                    if (json_last_error() !== JSON_ERROR_NONE) {
+                                        continue; // Skip to next hotel
+                                    }
+
+                                    if (is_null($hotelData)) {
+                                        continue;
+                                    }
+
+
+                                    $roomsToInsert = [];
+
+                                    if (isset($hotelData->rooms) && is_array($hotelData->rooms) && count($hotelData->rooms) > 0) {
+                                        foreach ($hotelData->rooms as $room) {
+                                            $roomsToInsert[] = [
+                                                'hotelid' => $hotelData->id,
+                                                'roomType' => $room->roomName ?? $room->desc ?? $room->type ?? 'N/A',
+                                                'price' => $room->price ?? 0,
+                                                'refundable' => $room->options->refundable ?? 0,
+                                                'halfBoard' => $room->options->halfBoard ?? 0,
+                                                'ultraAllInclusive' => $room->options->ultraAllInclusive ?? 0,
+                                                'allInclusive' => $room->options->allInclusive ?? 0,
+                                                'freeWifi' => $room->options->freeWifi ?? 0,
+                                                'fullBoard' => $room->options->fullBoard ?? 0,
+                                                'deposit' => $room->options->deposit ?? 0,
+                                                'cardRequired' => $room->options->cardRequired ?? 0,
+                                                'breakfast' => $room->options->breakfast ?? 0,
+                                                'smoking' => $room->options->smoking ?? 0,
+                                                'viewSentence' => $room->options->viewSentence ?? '',
+                                                'beds' => isset($room->options->beds) ? (is_object($room->options->beds) || is_array($room->options->beds) ? array_sum((array)$room->options->beds) : (int)$room->options->beds) : 0,
+                                                'doublebed' => $room->options->doublebed ?? 0,
+                                                'twin' => $room->options->twin ?? 0,
+                                                'available' => $room->options->available ?? 0,
+                                                'agencyId' => $room->agencyId ?? 0,
+                                                'agencyName' => $room->agencyName ?? 'N/A',
+                                                'booking_url' => isset($room->fullBookingURL) ? $room->fullBookingURL : '',
+                                                'balcony' => 0, // Assuming not available from API
+                                                'privateBathroom' => 1, // Assuming available
+                                                'dt_created' => now(),
+                                                'amenities' => 0, // Default value
+                                                'view' => '',
+                                                'roomtypeid' => 0
+                                            ];
+                                            $roomPrices = [];
+                                            foreach ($rooms as $room) {
+                                                $roomPrices[] = [
+                                                    'hotelid' => $hotelData->id,
+                                                    'roomtype' => $room->roomName ?? $room->desc ?? $room->type ?? 'N/A',
+                                                    'price' => $room->price ?? 0,
+                                                    'search_hash' => md5($chkin . $checout . $guest),
+                                                    'checkin' => $chkin ?? null,
+                                                    'checkout' => $checout ?? null,
+                                                    'created_at' => now(),
+                                                    'updated_at' => now(),
+                                                ];
+                                            }
+                                            DB::table('RoomPrices')->insert($roomPrices);
+                                        }
+                                    } else {
+                                    }
+
+                                    if (!empty($roomsToInsert)) {
+
+                                        // Filter out any 'total' fields from the data to prevent SQL errors
+                                        $roomsToInsert = array_map(function ($room) {
+                                            if (isset($room['total'])) {
+                                                unset($room['total']);
+                                            }
+                                            return $room;
+                                        }, $roomsToInsert);
+
+                                        DB::table('TPRoomtype_tmp')->insert($roomsToInsert);
+                                        DB::table('TPRoomtype')->where('id', $stagedHotel->id)->update(['flag' => 1]);
+                                    } else {
+                                    }
+                                } catch (\Exception $e) {
+                                }
+                            }
+
+                            // Check if there are any unprocessed records before starting the second process
+                            $unprocessedRecordsCount = DB::table('TPRoomtype')
+                                ->whereIn('hotelid', $hotelIdsFromApi)
+                                ->where('flag', 0)
+                                ->count();
+
+                            // Only process if there are unprocessed records
+                            if ($unprocessedRecordsCount > 0) {
+                                // Now, process the data from TPRoomtype and insert into TPRoomtype_tmp
+
+                                $rawDataRecords = DB::table('TPRoomtype')
+                                    ->whereIn('hotelid', $hotelIdsFromApi)
+                                    ->where('flag', 0)
+                                    ->get();
+
+                                // Only delete and reinsert if we actually have unprocessed records
+                                if (!empty($rawDataRecords) && $rawDataRecords->count() > 0) {
+                                    // Get the specific hotel IDs that have unprocessed records
+                                    $unprocessedHotelIds = $rawDataRecords->pluck('hotelid')->unique()->toArray();
+
+                                    if (!empty($unprocessedHotelIds)) {
+                                        DB::table('TPRoomtype_tmp')->whereIn('hotelid', $unprocessedHotelIds)->delete();
+                                    }
+                                } else {
+                                    $rawDataRecords = collect(); // Empty collection
+                                }
+                            } else {
+                                $rawDataRecords = collect(); // Empty collection
+                            }
+
+                            $roomsToInsert = [];
+                            foreach ($rawDataRecords as $record) {
+                                try {
+                                    $hotelData = json_decode($record->Roomdesc);
+                                    $hotelId = $record->hotelid;
+
+                                    if (isset($hotelData->rooms) && is_array($hotelData->rooms)) {
+                                        foreach ($hotelData->rooms as $room) {
+                                            // Process beds data to ensure it's an integer
+                                            $bedsValue = 0;
+                                            $doubleBedValue = 0;
+                                            $twinValue = 0;
+
+                                            if (isset($room->options->beds)) {
+                                                if (is_object($room->options->beds)) {
+                                                    // Handle object format
+                                                    if (isset($room->options->beds->double)) {
+                                                        $doubleBedValue = (int)$room->options->beds->double;
+                                                    }
+                                                    if (isset($room->options->beds->twin)) {
+                                                        $twinValue = (int)$room->options->beds->twin;
+                                                    }
+                                                    $bedsValue = $doubleBedValue + $twinValue;
+                                                } elseif (is_array($room->options->beds)) {
+                                                    // Handle array format
+                                                    $bedsValue = array_sum((array)$room->options->beds);
+                                                } else {
+                                                    // Handle scalar value
+                                                    $bedsValue = (int)$room->options->beds;
+                                                }
+                                            }
+
+                                            $roomsToInsert[] = [
+                                                'hotelid' => $hotelId,
+                                                'roomType' => $room->roomName ?? $room->desc ?? 'N/A',
+                                                'roomtypeid' => $room->internalTypeId ?? 0,
+                                                'breakfast' => isset($room->options->breakfast) ? (int)$room->options->breakfast : 0,
+                                                'available' => $room->options->available ?? 1,
+                                                'halfBoard' => isset($room->options->halfBoard) ? (int)$room->options->halfBoard : 0,
+                                                'ultraAllInclusive' => isset($room->options->ultraAllInclusive) ? (int)$room->options->ultraAllInclusive : 0,
+                                                'allInclusive' => isset($room->options->allInclusive) ? (int)$room->options->allInclusive : 0,
+                                                'refundable' => isset($room->options->refundable) ? (int)$room->options->refundable : 0,
+                                                'freeWifi' => isset($room->options->freeWifi) ? (int)$room->options->freeWifi : 1,
+                                                'fullBoard' => isset($room->options->fullBoard) ? (int)$room->options->fullBoard : 0,
+                                                'deposit' => isset($room->options->deposit) ? (int)$room->options->deposit : 0,
+                                                'smoking' => isset($room->options->smoking) ? (int)$room->options->smoking : 0,
+                                                'view' => $room->options->view ?? '',
+                                                'viewSentence' => $room->options->viewSentence ?? '',
+                                                'cardRequired' => isset($room->options->cardRequired) ? (int)$room->options->cardRequired : 0,
+                                                'beds' => $bedsValue,
+                                                'doublebed' => $doubleBedValue,
+                                                'twin' => $twinValue,
+                                                'balcony' => isset($room->options->balcony) ? (int)$room->options->balcony : 0,
+                                                'privateBathroom' => isset($room->options->privateBathroom) ? (int)$room->options->privateBathroom : 1,
+                                                'dt_created' => now(),
+                                                'images' => $room->images ?? '',
+                                                'price' => $room->price ?? 0,
+                                                'agencyId' => $room->agencyId ?? 0,
+                                                'agencyName' => $room->agencyName ?? '',
+                                                'amenities' => $room->amenities ?? 0,
+                                                'booking_url' => $room->bookingURL ?? '',
+                                            ];
+                                        }
+                                    }
+                                } catch (\Exception $e) {
+                                    continue;
+                                }
+                            }
+                            if (!empty($roomsToInsert)) {
+                                try {
+                                    // Filter out any 'total' fields from the data to prevent SQL errors
+                                    $roomsToInsert = array_map(function ($room) {
+                                        if (isset($room['total'])) {
+                                            unset($room['total']);
+                                        }
+                                        return $room;
+                                    }, $roomsToInsert);
+
+                                    // Insert rooms in smaller batches to avoid potential issues
+                                    $chunks = array_chunk($roomsToInsert, 50);
+                                    foreach ($chunks as $chunk) {
+                                        DB::table('TPRoomtype_tmp')->insert($chunk);
+                                    }
+
+
+                                    // Update the flag for processed records
+                                    $processedIds = array_column($rawDataRecords->all(), 'id');
+                                    DB::table('TPRoomtype')->whereIn('id', $processedIds)->update(['flag' => 1]);
+                                } catch (\Exception $e) {
+                                }
+                            } else {
+                            }
+                        } //start agency code
+                        $agencyData = [];
+                        if (isset($hotel->result) && is_array($hotel->result)) {
+                            foreach ($hotel->result as $hotelData) {
+                                if (isset($hotelData->rooms) && is_array($hotelData->rooms)) {
+                                    foreach ($hotelData->rooms as $room) {
+                                        $agencyName = $room->agencyName;
+
+                                        if (!in_array($agencyName, $agencyData)) {
+                                            $agencyData[] = $agencyName;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        //end agency code
+
+                        $idArray = array_column($hotel->result, 'id');
+                        $idArray = array_filter($idArray, function ($ids) {
+                            return isset($ids);
+                        });
+                        $idArray = array_unique($idArray);
+
+                        $cacheKey = "hotel_search_" . md5(implode('_', $idArray));
+
+                        $searchresults = Cache::remember($cacheKey, 300, function () use ($idArray) {
+                            return DB::table('TPHotel as h')
+                                ->select([
+                                    'h.hotelid',
+                                    'h.id',
+                                    'h.name',
+                                    'h.slug',
+                                    'h.stars',
+                                    'h.rating',
+                                    'h.amenities',
+                                    'h.distance',
+                                    'h.slugid',
+                                    'h.room_aminities',
+                                    'h.CityName',
+                                    'h.short_description',
+                                    'h.Latitude',
+                                    'h.longnitude',
+                                    'h.MicroSummary',
+                                    DB::raw('GROUP_CONCAT(
+                                              DISTINCT CONCAT(a.shortName, "|", COALESCE(a.image, ""))
+                                              ORDER BY a.name
+                                              SEPARATOR ", "
+                                          ) as amenity_info')
+                                ])
+                                ->leftJoin('TPHotel_amenities as a', function ($join) {
+                                    $join->whereRaw('FIND_IN_SET(a.id, h.shortFacilities) > 0');
+                                })
+                                ->whereIn('h.hotelid', $idArray)
+                                ->whereNotNull('h.slugid')
+                                ->groupBy([
+                                    'h.hotelid',
+                                    'h.id',
+                                    'h.name',
+                                    'h.slug',
+                                    'h.stars',
+                                    'h.rating',
+                                    'h.amenities',
+                                    'h.distance',
+                                    'h.slugid',
+                                    'h.room_aminities',
+                                    'h.CityName',
+                                    'h.short_description',
+                                    'h.Latitude',
+                                    'h.longnitude',
+                                    'h.MicroSummary'
+                                ])
+                                ->orderBy('h.stars', 'desc')
+                                ->get();
+                        });
+
+                        // Transform the results if needed
+                        $searchresults = $searchresults->map(function ($hotel) {
+                            $hotel->amenity_info = !empty($hotel->amenity_info)
+                                ? $hotel->amenity_info
+                                : '';
+                            return $hotel;
+                        });
+
+
+                        $count_result = count($searchresults);
+                    }
+
+                } catch (\Exception $e) {
+
+                    $searchresults = collect();
+                }
+
+
+                // end new code
+
+            }
+
+        } else {
+
+            //  return 2;
+        }
+
+        /*breadcrumb*/
+        $breadcrumbCacheKey = "breadcrumb_data_{$id}";
+        $breadcrumbData = Cache::remember($breadcrumbCacheKey, 86400, function () use ($id) {
+            $result = [
+                'getloclink' => collect(),
+                'getcontlink' => collect(),
+                'locationPatent' => [],
+                'getlocationexp' => collect(),
+                'lslug' => '',
+                'lslugid' => ''
+            ];
+
+            // Get location info
+            $locInfo = DB::table('Location as l')
+                ->select('l.LocationLevel', 'l.ParentId', 'l.LocationId', 'l.Slug', 'l.slugid', 'l.heading', 'l.Name', 'l.CountryId')
+                ->where('l.slugid', $id)
+                ->first();
+
+            if ($locInfo) {
+                $result['getloclink'] = collect([$locInfo]);
+                $result['lslug'] = $locInfo->Slug;
+                $result['lslugid'] = $locInfo->slugid;
+
+                // Get country info
+                $result['getcontlink'] = DB::table('Country as co')
+                    ->join('Location as l', 'l.CountryId', '=', 'co.CountryId')
+                    ->join('CountryCollaboration as cont', 'cont.CountryCollaborationId', '=', 'co.CountryCollaborationId')
+                    ->select('co.CountryId', 'co.Name', 'co.slug', 'cont.Name as cName', 'cont.CountryCollaborationId as contid')
+                    ->where('l.LocationId', $locInfo->LocationId)
+                    ->get();
+
+                // Get location details
+                $result['getlocationexp'] = DB::table('Location')
+                    ->select('slugid', 'LocationId', 'Name', 'Slug')
+                    ->where('LocationId', $locInfo->LocationId)
+                    ->get();
+
+                // Build location parent hierarchy
+                if ($locInfo->LocationLevel != 1) {
+                    $loopcount = $locInfo->LocationLevel;
+                    $lociID = $locInfo->ParentId;
+
+                    for ($i = 1; $i < $loopcount; $i++) {
+                        $getparents = DB::table('Location')
+                            ->select('slugid', 'LocationId', 'Name', 'Slug', 'ParentId')
+                            ->where('LocationId', $lociID)
+                            ->first();
+
+                        if ($getparents) {
+                            $result['locationPatent'][] = [
+                                'LocationId' => $getparents->slugid,
+                                'slug' => $getparents->Slug,
+                                'Name' => $getparents->Name,
+                            ];
+
+                            if ($getparents->ParentId != "") {
+                                $lociID = $getparents->ParentId;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return $result;
+        });
+
+
+        // Set variables from cached data
+        $getloclink = $breadcrumbData['getloclink'];
+        $getcontlink = $breadcrumbData['getcontlink'];
+        $locationPatent = $breadcrumbData['locationPatent'];
+        $getlocationexp = $breadcrumbData['getlocationexp'];
+        $lslug = $breadcrumbData['lslug'];
+        $lslugid = $breadcrumbData['lslugid'];
+
+        $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$id}", 86400, function () use ($id) {
+            return DB::table('TPHotel as h')
+                ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug',
+                    'h.OverviewShortDesc', 'h.rating', 'h.pricefrom', 'l.Name as Lname')
+                ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
+                ->whereExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('TPHotel_amenities as ha')
+                        ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
+                        ->where('ha.name', 'Swimming pool');
+                })
+                ->where('h.slugid', $id)
+                ->whereNotNull('h.OverviewShortDesc')
+                ->orderBy('h.stars', 'desc')
+                ->limit(4)
+                ->get();
+        });
+        /*breadcrumb*/
+
+        return [$searchresults, $hotel, $agencyData, $count_result];
+    }
+
+    private function handleWithoutDate($slgid, $st, $amenity, $price, $reviewscore, $amenity_ids, $neighborhood_ids, $propertyType_ids, $sights, $neighborhoods)
+    {
+        $pagetype = "withoutdate";
+        $getloc = DB::table('Temp_Mapping as tm')
+            // ->leftjoin('TPLocations as l', 'l.id', '=', 'tm.LocationId')
+            // ,'l.location'
+            ->select('tm.LocationId', 'tm.cityName', 'tm.countryName')
+            ->where('tm.slugid', $slgid)
+            ->where('tm.slug', $slug)
+            ->limit(1)
+            ->get();
+
+        if ($getloc->isEmpty()) {
+            if ($id) {
+                $checkgetloc = DB::table('Temp_Mapping as tm')
+                    ->select('tm.slugid', 'tm.slug')
+                    ->where('tm.Tid', $id)
+                    ->limit(1)
+                    ->get();
+                if (!$checkgetloc->isEmpty()) {
+                    $id = $checkgetloc[0]->slugid;
+                    $slug = $checkgetloc[0]->slug;
+                    return redirect()->route('hotel.list', [$id . '-' . $slug]);
+                }
+                // Redirect to the new URL
+                $checkgetloc2 = DB::table('Temp_Mapping as tm')
+                    ->select('tm.slugid', 'tm.slug')
+                    ->where('tm.LocationId', $id)
+                    ->get();
+                if (!$checkgetloc2->isEmpty()) {
+                    $id = $checkgetloc2[0]->slugid;
+                    $slug = $checkgetloc2[0]->slug;
+                    return redirect()->route('hotel.list', [$id . '-' . $slug]);
+                }
+
+            }
+            abort(404, 'Not found');
+        }
+        if (!$getloc->isEmpty()) {
+            $desiredId = $getloc[0]->LocationId;
+            $lname = $getloc[0]->cityName;
+            $countryname = $getloc[0]->countryName;
+        }
+
+        $locationid = $desiredId;
+
+
+        // header searchbar link
+        $hlid = $desiredId;
+
+        $locationgeo = "";
+
+
+        $gethoteltype = Cache::remember('hotel_types', 604800, function () {
+            return DB::table('TPHotel_types')
+                ->orderBy('hid', 'desc')
+                ->get();
+        });
+
+
+        $getloclink = collect();
+
+
+        $getloclink = DB::table('Temp_Mapping as tm')
+            ->join('Location as l', 'l.LocationId', '=', 'tm.Tid')
+            ->select('l.LocationLevel', 'l.ParentId', 'l.LocationId', 'l.Slug', 'tm.Tid')
+            ->where('tm.LocationId', $desiredId)
+            ->limit(1)
+            ->get();
+
+
+        $getcontlink = collect();
+
+        $getcontlink = DB::table('Country as co')
+            ->join('Location as l', 'l.CountryId', '=', 'co.CountryId')
+            ->join('CountryCollaboration as cont', 'cont.CountryCollaborationId', '=', 'co.CountryCollaborationId')
+            ->select('co.CountryId', 'co.Name', 'co.slug', 'cont.Name as cName', 'cont.CountryCollaborationId as contid')
+            ->where('l.LocationId', $getloclink[0]->LocationId)
+            ->get();
+
+
+        $locationPatent = [];
+        if (!$getloclink->isEmpty()) {
+            $Tid = $getloclink[0]->Tid;
+            $locationid = $getloclink[0]->LocationId;
+            $getlocationexp = DB::table('Location')->select('slugid', 'LocationId', 'Name', 'Slug')->where('LocationId', $locationid)->get();
+
+            if (!$getloclink->isEmpty() && $getloclink[0]->LocationLevel != 1) {
+                $loopcount = $getloclink[0]->LocationLevel;
+
+                $lociID = $getloclink[0]->ParentId;
+                for ($i = 1; $i < $loopcount; $i++) {
+                    $getparents = DB::table('Location')->select('slugid', 'LocationId', 'Name', 'Slug', 'ParentId')->where('LocationId', $lociID)->get();
+                    if (!empty($getparents)) {
+                        $locationPatent[] = [
+                            'LocationId' => $getparents[0]->slugid,
+                            'slug' => $getparents[0]->Slug,
+                            'Name' => $getparents[0]->Name,
+                        ];
+                        if (!empty($getparents) && $getparents[0]->ParentId != "") {
+                            $lociID = $getparents[0]->ParentId;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+
+        $metadata = DB::table('Location')->select('HotelTitleTag', 'HotelMetaDescription', 'MetaTagTitle', 'MetaTagDescription')->where('slugid', $slgid)->get();
+
+        // Add this at the start of your function to initialize
+        $searchresults = collect();
+
+        // Then in your code where the search results query is:
+        try {
+            $searchresults = $this->hotelService->getHotels([
+                'slgid' => $slgid,
+                'st' => $st,
+                'amenity' => $amenity,
+                'price' => $price,
+                'reviewscore' => $reviewscore,
+                'amenity_ids' => $amenity_ids,
+                'neighborhood_ids' => $neighborhood_ids,
+                'propertyType_ids' => $propertyType_ids,
+                'sights' => $sights,
+                'neighborhoods' => $neighborhoods,
+            ]);
+
+            $count_result = $searchresults->count();
+
+        } catch (\Exception $e) {
+
+        }
+        //nearby hotels with swimming pool
+
+        $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$slgid}", 86400, function () use ($slgid) {
+            return DB::table('TPHotel as h')
+                ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug',
+                    'h.OverviewShortDesc', 'h.rating', 'h.pricefrom', 'l.Name as Lname')
+                ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
+                ->whereExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('TPHotel_amenities as ha')
+                        ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
+                        ->where('ha.name', 'Swimming pool');
+                })
+                ->where('h.slugid', $slgid)
+                ->whereNotNull('h.OverviewShortDesc')
+                ->orderBy('h.stars', 'desc')
+                ->limit(4)
+                ->get();
+        });
+
+        //end nearby hotels with swimming pool
+        return [$searchresults, null, [], $count_result];
+    }
+
     private function getAmenityInfo($amenity_ids)
     {
         return DB::table('TPHotel_amenities')
@@ -2204,19 +1793,21 @@ public function insert_hotel_desction(request $request)
        $signature = md5($SignatureString);
     
 
-       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;   
+       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;
 
+        $searchCacheKey = 'hotellook_search_start_' . md5($url);
+        $response = Cache::remember($searchCacheKey, 3600, function () use ($url) {
+            return Http::withoutVerifying()->get($url);
+        });
 
-
-       $response = Http::withoutVerifying()->get($url);
 
        if ($response->successful()) {
-           
-       
+
+
        $data = json_decode($response);
            if(!empty($data)){
-           $searchId = $data->searchId;    
-           
+           $searchId = $data->searchId;
+
 
            $limit =10;
            $offset=0;
@@ -2225,16 +1816,19 @@ public function insert_hotel_desction(request $request)
            $sortBy='price';
 
            $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
-           $sig2 =  md5($SignatureString2);    
+           $sig2 =  md5($SignatureString2);
 
            $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=10&sortBy=price&sortAsc=1&roomsCount=10&offset=0&marker=299178&signature='.$sig2;
 
            $maxAttempts = 4;
-           $retryInterval = 1; 
-           $response2 = Http::withoutVerifying()
-           ->timeout(0) 
-           ->retry($maxAttempts, $retryInterval)
-           ->get($url2);   
+           $retryInterval = 1;
+            $getResultCacheKey = 'hotellook_get_result_' . md5($url2);
+            $response2 = Cache::remember($getResultCacheKey, 3600, function () use ($url2, $maxAttempts, $retryInterval) {
+                return Http::withoutVerifying()
+                    ->timeout(0)
+                    ->retry($maxAttempts, $retryInterval)
+                    ->get($url2);
+            });
 
            $jsonResponse = json_decode($response2, true);
 
@@ -2435,21 +2029,23 @@ public function hotel_room_desc(Request $request) {
        $signature = md5($SignatureString);
        //  $signature = '3193e161e98200459185e43dd7802c2c';
 
-       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;   
+       $url ='http://engine.hotellook.com/api/v2/search/start.json?hotelId='.$iata.'&checkIn='. $checkinDate.'&checkOut='.$checkoutDate.'&adultsCount='.$adultsCount.'&customerIP='.$customerIP.'&childrenCount='.$childrenCount.'&childAge1='.$chid_age.'&lang='.$lang.'&currency='.$currency.'&waitForResult='.$waitForResult.'&marker=299178&signature='.$signature;
 
+        $searchCacheKey = 'hotellook_search_start_' . md5($url);
+        $response = Cache::remember($searchCacheKey, 3600, function () use ($url) {
+            return Http::withoutVerifying()
+                ->timeout(30)  // 30 seconds timeout
+                ->retry(4, 1000) // retry 4 times with 1 second delay
+                ->get($url);
+        });
 
-
-      $response = Http::withoutVerifying()
-        ->timeout(30)  // 30 seconds timeout
-        ->retry(4, 1000) // retry 4 times with 1 second delay
-        ->get($url);
        if ($response->successful()) {
-           
-       
+
+
        $data = json_decode($response);
            if(!empty($data)){
-           $searchId = $data->searchId;    
-           
+           $searchId = $data->searchId;
+
 
            $limit =10;
            $offset=0;
@@ -2458,17 +2054,20 @@ public function hotel_room_desc(Request $request) {
            $sortBy='price';
 
            $SignatureString2 = "". $TRAVEL_PAYOUT_TOKEN .":".$TRAVEL_PAYOUT_MARKER.":".$limit.":".$offset.":".$roomsCount.":".$searchId.":".$sortAsc.":".$sortBy;
-               $sig2 =  md5($SignatureString2);    
+               $sig2 =  md5($SignatureString2);
 
            $url2 = 'http://engine.hotellook.com/api/v2/search/getResult.json?searchId='.$searchId.'&limit=10&sortBy=price&sortAsc=1&roomsCount=10&offset=0&marker=299178&signature='.$sig2;
        // $response2 = Http::withoutVerifying()->get($url2);
-               
+
            $maxAttempts = 4;
            $retryInterval = 1; // seconds
-           $response2 = Http::withoutVerifying()
-           ->timeout(0) // Maximum time for an individual request
-           ->retry($maxAttempts, $retryInterval)
-           ->get($url2);   
+            $getResultCacheKey = 'hotellook_get_result_' . md5($url2);
+            $response2 = Cache::remember($getResultCacheKey, 3600, function () use ($url2, $maxAttempts, $retryInterval) {
+                return Http::withoutVerifying()
+                    ->timeout(0) // Maximum time for an individual request
+                    ->retry($maxAttempts, $retryInterval)
+                    ->get($url2);
+            });
            $jsonResponse = json_decode($response2, true);
            
            //new code 1

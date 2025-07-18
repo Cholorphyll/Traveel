@@ -13,4 +13,9 @@ class Hotel extends Model
     public $primaryKey  = 'hotelid';
     public $table = "TPHotel";
 	protected $fillable = ['things_to_know','id','name','slugid']; // Specify which fields are fillable
+
+    public function location()
+    {
+        return $this->belongsTo(Location::class, 'slugid', 'slugid');
+    }
 }

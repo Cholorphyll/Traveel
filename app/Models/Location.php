@@ -31,4 +31,19 @@ class Location extends Model
         'LocationId',
         // Add other fields as necessary
     ];
+
+    public function hotels()
+    {
+        return $this->hasMany(Hotel::class, 'slugid', 'slugid');
+    }
+
+    public function neighborhoods()
+    {
+        return $this->hasMany(Neighborhood::class, 'LocationID', 'LocationId');
+    }
+
+    public function sights()
+    {
+        return $this->hasMany(Sight::class, 'Location_id', 'slugid');
+    }
 }
