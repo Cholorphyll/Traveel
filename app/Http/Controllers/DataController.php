@@ -2976,16 +2976,12 @@ private function getWithinRadius($distance): int
                 $lslugid = $breadcrumbData['lslugid'];
 
                 $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$desiredId}", 86400, function() use ($desiredId) {
+                    $swimmingPoolId = DB::table('TPHotel_amenities')->where('name', 'Swimming pool')->value('id');
                     return DB::table('TPHotel as h')
                         ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug',
                                  'h.OverviewShortDesc', 'h.rating', 'h.pricefrom', 'l.Name as Lname')
                         ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
-                        ->whereExists(function($query) {
-                            $query->select(DB::raw(1))
-                                ->from('TPHotel_amenities as ha')
-                                ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
-                                ->where('ha.name', 'Swimming pool');
-                        })
+                        ->whereRaw('FIND_IN_SET(?, h.facilities)', [$swimmingPoolId])
                         ->where('h.slugid', $desiredId)
                         ->whereNotNull('h.OverviewShortDesc')
                         ->orderBy('h.stars', 'desc')
@@ -3316,67 +3312,17 @@ private function getWithinRadius($distance): int
           //nearby hotels with swimming pool
 
                $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$desiredId}", 2592000, function() use ($desiredId) {
-                    try {
-                        // Step 1: Get all hotels with swimming pools for this location (pre-filtered)
-                        // This is a more efficient approach that avoids the expensive FIND_IN_SET operation in the main query
-                        $cacheKey = "hotels_with_pool_{$desiredId}_prefiltered";
-                        
-                        // Get hotels with swimming pools from cache or database
-                        $hotelIds = Cache::remember($cacheKey, 2592000, function() use ($desiredId) {
-                            // Get swimming pool amenity ID (cached for 7 days)
-                            $swimmingPoolId = Cache::remember('swimming_pool_amenity_id', 604800, function() {
-                                return DB::table('TPHotel_amenities')
-                                    ->where('name', 'Swimming pool')
-                                    ->value('id');
-                            });
-                            
-                            // If we have the swimming pool ID, use it to get hotel IDs
-                            if ($swimmingPoolId) {
-                                return DB::table('TPHotel')
-                                    ->select('id')
-                                    ->where('slugid', $desiredId)
-                                    ->whereRaw("FIND_IN_SET(?, facilities) > 0", [$swimmingPoolId])
-                                    ->whereNotNull('OverviewShortDesc')
-                                    ->pluck('id')
-                                    ->toArray();
-                            } else {
-                                // Fallback - get IDs using the subquery approach
-                                return DB::table('TPHotel as h')
-                                    ->select('h.id')
-                                    ->whereExists(function($query) {
-                                        $query->select(DB::raw(1))
-                                            ->from('TPHotel_amenities as ha')
-                                            ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
-                                            ->where('ha.name', 'Swimming pool');
-                                    })
-                                    ->where('h.slugid', $desiredId)
-                                    ->whereNotNull('h.OverviewShortDesc')
-                                    ->pluck('h.id')
-                                    ->toArray();
-                            }
-                        });
-                        
-                        // Step 2: If we have hotel IDs, fetch the full data for these specific hotels
-                        // This avoids the expensive FIND_IN_SET and whereExists operations in the main query
-                        if (!empty($hotelIds)) {
-                            return DB::table('TPHotel as h')
-                                ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug', 
-                                        'h.OverviewShortDesc', 'h.rating', 'h.pricefrom', 'l.Name as Lname')
-                                ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
-                                ->whereIn('h.id', $hotelIds)
-                                ->orderBy('h.stars', 'desc')
-                                ->limit(4)
-                                ->get();
-                        }
-                        
-                        // Return empty collection if no hotels found
-                        return collect([]);
-                    } catch (\Exception $e) {
-                        // Log the error for debugging but don't expose to user
-                        Log::error('Error fetching hotels with swimming pool: ' . $e->getMessage());
-                        // Return empty collection to prevent page failure
-                        return collect([]);
-                    }
+                    $swimmingPoolId = DB::table('TPHotel_amenities')->where('name', 'Swimming pool')->value('id');
+                    return DB::table('TPHotel as h')
+                        ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug',
+                                 'h.OverviewShortDesc','h.rating','h.pricefrom','l.Name as Lname')
+                        ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
+                        ->whereRaw('FIND_IN_SET(?, h.facilities)', [$swimmingPoolId])
+                        ->where('h.slugid', $desiredId)
+                        ->whereNotNull('h.OverviewShortDesc')
+                        ->orderBy('h.stars', 'desc')
+                        ->limit(4)
+                        ->get();
                 });
 
             //end nearby hotels with swimming pool

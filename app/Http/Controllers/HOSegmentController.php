@@ -1545,16 +1545,13 @@ class HOSegmentController extends Controller
           //nearby hotels with swimming pool
             
                 $neabyhotelwithswimingpool = Cache::remember("nearby_hotels_{$slgid}", 86400, function() use ($slgid) {
+                    $swimmingPoolId = DB::table('TPHotel_amenities')->where('name', 'Swimming pool')->value('id');
+
                     return DB::table('TPHotel as h')
                         ->select('h.name', 'h.location_id', 'h.id', 'h.hotelid', 'h.slugid', 'h.slug', 
                                  'h.OverviewShortDesc','h.rating','h.pricefrom','l.Name as Lname')
                         ->leftJoin('Location as l', 'l.slugid', '=', 'h.slugid')
-                        ->whereExists(function($query) {
-                            $query->select(DB::raw(1))
-                                ->from('TPHotel_amenities as ha')
-                                ->whereRaw('FIND_IN_SET(ha.id, h.facilities) > 0')
-                                ->where('ha.name', 'Swimming pool');
-                        })
+                        ->whereRaw('FIND_IN_SET(?, h.facilities)', [$swimmingPoolId])
                         ->where('h.slugid', $slgid)
                         ->whereNotNull('h.OverviewShortDesc')
                         ->orderBy('h.stars', 'desc')
