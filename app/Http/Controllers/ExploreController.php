@@ -493,28 +493,27 @@ class ExploreController extends Controller
 
         // Process sight categories for each result
         if (!empty($searchresults)) {
+            // Collect all SightIds
+            $sightIds = array_map(fn($s) => $s->SightId, $searchresults);
+
+            // Fetch all categories for these SightIds
+            $allCategories = DB::table('SightCategory')
+                ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
+                ->select('SightCategory.SightId', 'Category.Title')
+                ->whereIn('SightCategory.SightId', $sightIds)
+                ->get()
+                ->groupBy('SightId');
+
+            // Fetch all timings for these SightIds
+            $allTimings = DB::table('SightTiming')
+                ->whereIn('SightId', $sightIds)
+                ->get()
+                ->groupBy('SightId');
+
+            // Assign to each result
             foreach ($searchresults as $results) {
-                if (isset($results->SightId) && (
-                    strpos($results->SightId, 'rest_') === 0 ||
-                    strpos($results->SightId, 'exp_') === 0)) {
-                    // For restaurants and experiences, create an empty Sightcat collection
-                    $results->Sightcat = collect();
-                    $results->timing = [];
-                } else if (isset($results->SightId)) {
-                    // For attractions, get categories and timing
-                    $sightId = $results->SightId;
-
-                    $Sightcat = DB::table('SightCategory')
-                        ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
-                        ->select('Category.Title')
-                        ->where('SightCategory.SightId', '=', $sightId)
-                        ->get();
-
-                    $results->Sightcat = $Sightcat;
-
-                    $timing = DB::select("SELECT * FROM SightTiming WHERE SightId = ?", [$sightId]);
-                    $results->timing = $timing;
-                }
+                $results->Sightcat = $allCategories[$results->SightId] ?? collect();
+                $results->timing = $allTimings[$results->SightId] ?? [];
             }
         }
 
@@ -1212,22 +1211,46 @@ class ExploreController extends Controller
     //	return $request->session()->all() ;
 
 
-    if (!$request->session()->has('mustSee') && !$request->session()->has('isrestaurant') && (empty($categoryIds) || $categoryIds[0] == null)) {
+     if (!$request->session()->has('mustSee') && !$request->session()->has('isrestaurant') && (empty($categoryIds) || $categoryIds[0] == null)) {
         $result =[];
-        $result = DB::table('Sight')
-        ->join('Location','Location.LocationId','=','Sight.LocationId')
-        ->leftJoin('Sight_image as img', function ($join) {
-            $join->on('Sight.SightId', '=', 'img.Sightid');
-            $join->whereRaw('img.Image = (SELECT Image FROM Sight_image WHERE Sightid = Sight.SightId LIMIT 1)');
-           })
-        ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
-        ->where('Sight.LocationId', $locId)
-       // ->select('Category.Title  as CategoryTitle', 'Sight.*','Location.slugid', 'img.Image','Location.Name as LName')
-         ->select('Sight.SightId', 'Sight.IsMustSee', 'Sight.Title', 'Sight.TAAggregateRating', 'Sight.LocationId', 'Sight.Slug', 'IsRestaurant', 'Address', 'Sight.Latitude', 'Sight.Longitude', 'Sight.CategoryId', 'Category.Title as CategoryTitle', 'Location.Name as LName', 'Location.slugid',  'img.Image', 'Sight.TATotalReviews','Sight.ticket','Sight.MicroSummary')
-            ->orderBy('Sight.IsMustSee', 'asc')
-        //->orderBy('Sight.TATotalReviews','desc')
-        ->limit(10)
-        ->get()->toArray();
+        // Use cache to store the results for 1 hour
+        $cacheKey = 'sight_titles_' . $locId;
+        $result = Cache::remember($cacheKey, now()->addHour(), function() use ($locId) {
+            return DB::table('Sight')
+                ->select([
+                    'Sight.SightId',
+                    'Sight.IsMustSee',
+                    'Sight.Title',
+                    'Sight.TAAggregateRating',
+                    'Sight.LocationId',
+                    'Sight.Slug',
+                    'Sight.IsRestaurant',
+                    'Sight.Address',
+                    'Sight.Latitude',
+                    'Sight.Longitude',
+                    'Sight.CategoryId',
+                    'Sight.TATotalReviews',
+                    'Sight.ticket',
+                    'Sight.MicroSummary',
+                    'Category.Title as CategoryTitle',
+                    'Location.Name as LName',
+                    'Location.slugid',
+                    'img.Image'
+                ])
+                ->join('Location', 'Location.LocationId', '=', 'Sight.LocationId')
+                ->leftJoin('Sight_image as img', function ($join) {
+                    $join->on('Sight.SightId', '=', 'img.Sightid')
+                         ->whereRaw('img.Image = (SELECT si.Image FROM Sight_image si WHERE si.Sightid = Sight.SightId LIMIT 1)');
+                })
+                ->leftJoin('Category', 'Sight.categoryId', '=', 'Category.categoryId')
+                ->where('Sight.LocationId', $locId)
+                ->whereNotNull('Sight.Title')
+                ->where('Sight.Title', '!=', '')
+                ->orderBy('Sight.IsMustSee', 'asc')
+                ->limit(10)
+                ->get()
+                ->toArray();
+        });
 
     }
     // return $result;
@@ -1266,25 +1289,38 @@ class ExploreController extends Controller
         //new code
     if (!empty($result)) {
 
+    // Collect all SightIds
+    $sightIds = array_map(fn($s) => $s->SightId, $result);
+
+    // Batch fetch categories, timings, reviews, images
+    $allCategories = DB::table('SightCategory')
+        ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
+        ->select('SightCategory.SightId', 'Category.Title')
+        ->whereIn('SightCategory.SightId', $sightIds)
+        ->get()
+        ->groupBy('SightId');
+
+    $allTimings = DB::table('SightTiming')
+        ->whereIn('SightId', $sightIds)
+        ->get()
+        ->groupBy('SightId');
+
+    $allReviews = DB::table('SightReviews')
+        ->whereIn('SightId', $sightIds)
+        ->get()
+        ->groupBy('SightId');
+
+    $sightImages = DB::table('Sight_image')
+        ->whereIn('Sightid', $sightIds)
+        ->get()
+        ->groupBy('Sightid');
+
+    // Assign to each result
     foreach ($result as $results) {
-        $sightId = $results->SightId;
-
-        $Sightcat = DB::table('SightCategory')
-            ->join('Category', 'SightCategory.CategoryId', '=', 'Category.CategoryId')
-            ->select('Category.Title')
-            ->where('SightCategory.SightId', '=', $sightId)
-            ->get();
-
-        $results->Sightcat = $Sightcat;
-
-        $timing = DB::select("SELECT * FROM SightTiming WHERE SightId = ?", [$sightId]);
-        $results->timing = $timing;
-
-        // Retrieve reviews for the sight using a raw SQL query
-        $reviews = DB::select("SELECT * FROM SightReviews WHERE SightId = ?", [$sightId]);
-
-        // Merge the reviews into the result directly
-        $results->reviews = $reviews;
+        $results->Sightcat = $allCategories[$results->SightId] ?? collect();
+        $results->timing = $allTimings[$results->SightId] ?? [];
+        $results->reviews = $allReviews[$results->SightId] ?? collect();
+        $results->images = $sightImages[$results->SightId] ?? collect();
     }
     }
 
