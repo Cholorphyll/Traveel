@@ -1,0 +1,138 @@
+
+/* new css */
+
+.content-end{
+  margin-left: auto;
+}
+
+
+.info-box {
+  border: 1px solid #ccc; /* Border color and style */
+  border-radius: 8px; /* Rounded corners */
+  padding: 20px; /* Padding inside the box */
+  margin: 20px auto; /* Center the box horizontally */
+  width: 577px; /* Width of the box */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Optional: add a subtle shadow for depth */
+  background-color:white; /* Optional: background color */
+}
+
+.info-box h3 {
+  margin-top: 0; /* Remove default margin from the top */
+}
+
+.info-box h5 {
+  margin-bottom: 5px; /* Reduce space below headings */
+}
+
+.float-right{
+  float: right;
+}
+
+.review-outline{
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px auto;
+
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background-color: white;
+}
+.mlr{
+  margin-left: 104px;
+}
+
+
+
+
+/* 
+pagination */
+
+/* public/css/custom.css */
+
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.pagination {
+  display: flex;
+  padding-left: 0;
+  list-style: none;
+  border-radius: 0.25rem;
+}
+
+.pagination li {
+  display: inline; /* Ensure list items are displayed inline */
+  margin: 0 2px; /* Add margin between items for better spacing */
+}
+
+.pagination li a,
+.pagination li span {
+  color: #007bff;
+  text-decoration: none;
+  background-color: #fff;
+  border: 1px solid #dee2e6;
+  padding: 0.5rem 0.75rem;
+  margin-left: -1px;
+}
+
+.pagination li:first-child a,
+.pagination li:first-child span {
+  margin-left: 0;
+  border-top-left-radius: 0.25rem;
+  border-bottom-left-radius: 0.25rem;
+}
+
+.pagination li:last-child a,
+.pagination li:last-child span {
+  border-top-right-radius: 0.25rem;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.pagination li a:hover,
+.pagination li a:focus {
+  color: #0056b3;
+  background-color: #e9ecef;
+  border-color: #dee2e6;
+}
+.l-arrow {
+  width: 19px;
+  margin-right: 10px;
+}
+
+.back{
+  text-decoration: none;
+}
+/* 
+new code */
+.form-check-inline {
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.form-check-input {
+  margin-right: 5px;
+}
+
+.info-box2 {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px auto;
+
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background-color: white;
+}
+
+.rl-margin{
+  margin-top: 20px;
+  margin-left: 24px;
+}
+
+
+/*new css rest */
+
+.marginr-10{
+  margin-right:10px;
+}

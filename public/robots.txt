@@ -1,0 +1,10 @@
+User-agent: *
+
+Disallow: /getwithoutdatedata
+Disallow: /searchr?q=
+Disallow: /blog
+Disallow: /cek
+Disallow: /hotel/transportation
+Disallow: /insert_hotel_desction
+
+Sitemap: https://www.travell.co.in/sitemap-en-us.xml

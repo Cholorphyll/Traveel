@@ -1,0 +1,15 @@
+.center-form {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.col-md-12 {
+  width: 100%; /* Ensures the form takes up the full width */
+}
+
+.center-col {
+  width: 60%;; /* Adjust the width of the form columns as needed */
+  margin: auto;
+}

@@ -1,0 +1,55 @@
+# 📤 UPLOAD FILES TO YOUR 3 LIGHTSAIL SERVERS
+
+## Quick Copy-Paste Commands
+
+Replace <SERVER1_IP>, <SERVER2_IP>, <SERVER3_IP> with your actual server IPs.
+
+---
+
+## SERVER 1 - Upload Commands
+
+scp start_server1_27jobs.sh ubuntu@<SERVER1_IP>:/var/www/html/
+scp monitor_distributed_system.sh ubuntu@<SERVER1_IP>:/var/www/html/
+scp app/Console/Commands/FetchHotelImages.php ubuntu@<SERVER1_IP>:/var/www/html/app/Console/Commands/
+
+---
+
+## SERVER 2 - Upload Commands
+
+scp start_server2_27jobs.sh ubuntu@<SERVER2_IP>:/var/www/html/
+scp monitor_distributed_system.sh ubuntu@<SERVER2_IP>:/var/www/html/
+scp app/Console/Commands/FetchHotelImages.php ubuntu@<SERVER2_IP>:/var/www/html/app/Console/Commands/
+
+---
+
+## SERVER 3 - Upload Commands
+
+scp start_server3_27jobs.sh ubuntu@<SERVER3_IP>:/var/www/html/
+scp monitor_distributed_system.sh ubuntu@<SERVER3_IP>:/var/www/html/
+scp app/Console/Commands/FetchHotelImages.php ubuntu@<SERVER3_IP>:/var/www/html/app/Console/Commands/
+
+---
+
+## After Upload - Run on Each Server
+
+# SSH into server
+ssh ubuntu@<SERVER_IP>
+
+# Make scripts executable
+cd /var/www/html
+chmod +x start_server*.sh monitor_distributed_system.sh
+
+# Start the jobs
+./start_server1_27jobs.sh  # On Server 1
+./start_server2_27jobs.sh  # On Server 2
+./start_server3_27jobs.sh  # On Server 3
+
+---
+
+## Monitor Progress
+
+# On any server
+./monitor_distributed_system.sh
+
+# Or continuous monitoring (updates every 30 seconds)
+watch -n 30 './monitor_distributed_system.sh'

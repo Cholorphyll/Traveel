@@ -1,0 +1,23 @@
+<svg width="99" height="93" viewBox="0 0 99 93" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g clip-path="url(#clip0_bar_icon)">
+    <!-- Glass outline -->
+    <path d="M30 10H69L50 38H49L30 10Z" stroke="#272E38" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Stem -->
+    <path d="M49.5 38V68" stroke="#272E38" stroke-width="1.2" stroke-linecap="round"/>
+    
+    <!-- Base -->
+    <path d="M43 68H56" stroke="#272E38" stroke-width="1.2" stroke-linecap="round"/>
+    
+    <!-- Straw -->
+    <path d="M56 16L70 4" stroke="#272E38" stroke-width="1.2" stroke-linecap="round"/>
+    
+    <!-- Lemon slice or olive -->
+    <circle cx="74" cy="4" r="3.5" stroke="#272E38" stroke-width="1.2"/>
+  </g>
+  <defs>
+    <clipPath id="clip0_bar_icon">
+      <rect width="99" height="93" fill="white"/>
+    </clipPath>
+  </defs>
+</svg>

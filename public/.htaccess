@@ -1,0 +1,43 @@
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Allow only travell.co.in
+    RewriteCond %{HTTP_HOST} !^(www\.)?travell\.co\.in$ [NC]
+    RewriteRule ^ - [F]
+
+    # Redirect HTTP to HTTPS
+    #RewriteCond %{HTTPS} off
+    #RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Redirect to www
+    RewriteCond %{HTTP_HOST} !^www\. [NC]
+    RewriteRule ^(.*)$ https://www.%{HTTP_HOST}/$1 [R=301,L]
+
+    # Redirect Trailing Slashes If Not A Folder...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+    
+    # Remove unwanted tracking parameters like sqx only for hotel detail (hd-) URLs
+    RewriteCond %{REQUEST_URI} ^/hd- [NC]
+    RewriteCond %{QUERY_STRING} ^(.*)&?sqx[^&]*&?(.*)$ [NC]
+    RewriteRule ^(.*)$ /$1?%1%2 [R=301,L]
+    
+    RewriteCond %{REQUEST_URI} ^/hd- [NC]
+    RewriteCond %{QUERY_STRING} ^sqx[^&]*&?(.*)$ [NC]
+    RewriteRule ^(.*)$ /$1?%1 [R=301,L]
+    
+    RewriteCond %{REQUEST_URI} ^/hd- [NC]
+    RewriteCond %{QUERY_STRING} ^(.*)&sqx[^&]*$ [NC]
+    RewriteRule ^(.*)$ /$1?%1 [R=301,L]
+
+    # Send Requests To Front Controller...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
+

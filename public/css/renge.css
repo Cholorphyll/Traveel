@@ -1,0 +1,47 @@
+.daterangepicker.ltr .left .daterangepicker_input,
+.daterangepicker.ltr .right .daterangepicker_input {
+  display: none;
+}
+
+.daterangepicker {
+  box-shadow: 0 0 15px #ddd;
+  border-radius: 20px;
+  margin-top: 30px;
+  left: 65px !important;
+  padding: 20px ;
+}
+.daterangepicker::before,
+.daterangepicker::after {
+  display: none;
+}
+.daterangepicker td.in-range {
+  background: #eee;
+}
+
+.daterangepicker td.active,
+.daterangepicker td.active:hover {
+  background-color: #000;
+  color: white;
+  border-radius: 50%;
+  padding:0 8px;
+}
+tbody,
+td,
+tfoot,
+th,
+thead,
+tr {
+  padding: 10px 0;
+}
+
+.daterangepicker td,
+.daterangepicker th {
+  width: 30px !important;
+  height: 30px !important;
+}
+.daterangepicker td.start-date.end-date {
+  border-radius: 50%;
+}
+.calendar thead tr:last-of-type th:first-of-type {
+  color: var(--main-color) !important;
+}

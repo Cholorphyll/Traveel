@@ -1,0 +1,233 @@
+main .carousel {
+  border-radius: 20px;
+}
+main .carousel .carousel-indicators {
+  margin-bottom: 0.3rem;
+}
+main .carousel .carousel-indicators [data-bs-target] {
+  border-radius: 50%;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px;
+  opacity: 0.6;
+}
+main .carousel .carousel-indicators [data-bs-target].active {
+  opacity: 1;
+}
+main .carousel .carousel-btn {
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  position: absolute;
+  top: 50%;
+  margin: 0 30px;
+  -webkit-transform: translateY(-50%);
+  transform: translateY(-50%);
+  padding: 10px;
+  -webkit-transition: 0.3s ease;
+  transition: 0.3s ease;
+  border: 3px solid;
+  opacity: 0;
+}
+main .carousel:hover .carousel-btn {
+  border: 2px solid white;
+  opacity: 1;
+}
+
+main .attractions img {
+  border-radius: 20px;
+}
+
+main .attractions .fa-bookmark {
+  top: 10px;
+  right: 20px;
+}
+
+main .near-hotels .fa-bookmark {
+  top: 24px;
+  right: 25px;
+}
+.where-be .fs-26 {
+font-weight: 500;}
+main .nearby img {
+  border-radius: 20px;
+}
+.testmonial p.ls-0{
+  line-height: 28px;
+}
+aside .vote-section {
+  width: 145px;
+  height: 45px;
+}
+aside .check {
+  max-width: 390px;
+}
+
+/* add photo  */
+.add-photo {
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  background: rgba(92, 92, 92, 0.26);
+  z-index: 2001;
+}
+.add-photo .trash {
+  width: 50px;
+  height: 50px;
+  transition: .3s ease-in-out;
+}
+.add-photo .trash:hover {
+  box-shadow: 0 0 20px #ddd;
+}
+/* add tip  */
+.add-tip {
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  background: rgba(92, 92, 92, 0.26);
+  z-index: 2000;
+}
+.add-tip-section {
+  border: 3px dotted #ccc;
+}
+.close-tip,
+.close-photo {
+  top: 50px;
+  right: 2%;
+  transition: 0.3s ease-in-out;
+}
+.close-tip:hover,
+.close-photo:hover {
+  background: #ddd;
+}
+
+/* lightbox  */
+.lightbox {
+  background: #000;
+}
+.lightbox .close:hover {
+  background: #666;
+}
+.lightbox .img-box {
+  max-width: 700px;
+  margin: 0 auto;
+}
+.lightbox .images {
+  max-width: 700px;
+  margin: 0 auto;
+}
+.lightbox .owl-carousel .item {
+  width: 72px !important;
+}
+
+/* big screens */
+@media (min-width: 929px) {
+  .owl-prev,
+  .owl-next {
+    width: 15px;
+    height: 100px;
+    position: absolute;
+    top: 28px;
+    transform: translateY(-50%);
+    display: block !important;
+    border: 0px solid black;
+  }
+  .owl-prev {
+    left: 10px;
+  }
+  .owl-next {
+    right: 10px;
+  }
+  .owl-prev i,
+  .owl-next i {
+    transform: scale(2, 2);
+    color: #fff;
+  }
+  .add-photo-box {
+    max-width: 780px;
+  }
+  .add-tip-box {
+    width: 780px;
+  }
+}
+/* small screens */
+@media (max-width: 929px) {
+  .fs-sm-12{
+    font-size: 12px;
+  }
+  .m--5{
+    margin-bottom: -5px;
+  }
+  .fs-sm-14{
+    font-size: 14px;
+  }
+  .fs-sm-16{
+    font-size: 16px;
+  }
+  .owl-theme .owl-nav {
+    display: none;
+  }
+  .carousel .carousel-btn {
+    display: none;
+  }
+  .about h5.fs-22 {
+    font-size: 20px;
+  }
+  .attractions .rating {
+    min-width: 70px !important;
+    border: none !important;
+  }
+  .attractions .rating span.fw-bold.fs-18 {
+    font-size: 14px;
+    flex-grow: 1;
+  }
+  .known h5.fs-22 {
+    font-size: 20px !important;
+  }
+  .time-stay .fs-22 {
+    font-size: 20px !important;
+  }
+  .nearby h5.fs-22 {
+    font-size: 20px !important;
+  }
+  .where-be .fs-26 {
+    font-size: 22px;
+  }
+  .where-be h6.fs-18 {
+    font-size: 16px !important;
+  }
+  .attractions .fs-26 {
+    font-size: 24px;
+  }
+  .attractions h6.fs-18 {
+    font-size: 16px;
+  }
+  .attractions .see-all {
+    font-size: 14px;
+  }
+  .attractions .distance{
+    font-size: 14px;
+  }
+  .lightbox .fs-30 {
+    font-size: 20px;
+  }
+  .lightbox .img-box img {
+    width: 100%;
+  }
+  .lightbox .images {
+    width: 100% !important;
+    margin: 0 auto;
+  }
+  .add-photo .add-img-section img {
+    order: 1;
+  }
+  .add-photo .add-img-section span {
+    order: 2;
+    margin-left: auto;
+  }
+  .add-photo .add-img-section .form-control {
+    order: 3;
+  }
+}

@@ -1,0 +1,51 @@
+@media screen and (max-width: 768px) {
+  .where-be {
+    width: 100%;
+    position: relative;
+  }
+}
+
+@media screen and (max-width: 640px) {
+  .mobile .col-sm-6 {
+    width: 50% !important;
+    display: flex;
+  }
+  .mobile .text-main,
+  .text-secondary,
+  .green {
+    font-size: 12px;
+  }
+  .mobmenu {
+    display: inline-block;
+    position: fixed;
+    bottom: 50px;
+    left: 5%;
+    right: 0px;
+    width: 90%;
+  }
+  .whislist,
+  .whislistlist,
+  .price {
+    padding: 10px 0px 0 0;
+    font-size: 12px;
+    border: none;
+    float: none;
+  }
+  .title {
+    font-size: 16px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .mobile .col-sm-6 {
+    width: 50% !important;
+    display: flex;
+  }
+}
+
+@media screen and (max-width: 320px) {
+  .mobile .col-sm-6 {
+    width: 50% !important;
+    display: flex;
+  }
+}

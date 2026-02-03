@@ -1,0 +1,282 @@
+/* Start Slick Slider CSS */
+
+.slick-slide {
+  margin: 0px 5px;
+}
+.logo-carousel {
+  overflow: inherit;
+}
+
+.slick-track::before,
+.slick-track::after {
+  display: table;
+  content: "";
+}
+.slick-track::after {
+  clear: both;
+}
+.slick-loading .slick-track {
+  visibility: hidden;
+}
+.slick-slide.dragging img {
+  pointer-events: none;
+}
+.slick-loading .slick-slide {
+  visibility: hidden;
+}
+.slick-arrow {
+  position: absolute;
+  background: url(../images/arrow.png) no-repeat center;
+  text-indent: -10000px;
+  margin-top: -10px;
+  z-index: 99;
+  background-size: 38px;
+}
+.slide{
+  width: auto !important;
+}
+.slick-slide{
+  width: auto !important;
+}
+.slick-arrow.slick-next {
+  right: -35px;
+  transform: rotate(180deg);
+  overflow: hidden !important;
+  border-radius: 50%;
+  width: 35px;
+  height: 35px;
+  top: 13px;
+  border: 1px solid #111 ;
+}
+.slick-arrow.slick-prev {
+  display: block !important;
+  
+  left: -35px;
+  overflow: hidden !important;
+  border-radius: 50%;
+  width: 35px;
+  height: 35px;
+  top: 13px;
+  border: 1px solid #111 ;
+}
+/* JsFiddle Example only/don't use */
+.logo-carousel {
+  margin-top: 32px;
+}
+
+.circle-search {
+  background: #fff;
+  border: 1px solid #8d8d8d;
+  border-radius: 20px;
+  text-align: center;
+  padding: 8px;
+}
+
+.search-circle {
+  position: absolute;
+  margin-top: 37px;
+  border: 1px solid #000;
+  border-radius: 50%;
+  padding: 5px;
+  height: 35px;
+  width: 35px;
+  text-align: center;
+}
+
+/* Slider */
+.slick-slider {
+  position: relative;
+
+  display: block;
+  box-sizing: border-box;
+
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+
+  -webkit-touch-callout: none;
+  -khtml-user-select: none;
+  -ms-touch-action: pan-y;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.slick-list {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+.slick-list:focus {
+  outline: none;
+}
+.slick-list.dragging {
+  cursor: pointer;
+  cursor: hand;
+}
+
+.slick-slider .slick-track,
+.slick-slider .slick-list {
+  -webkit-transform: translate3d(0, 0, 0);
+  -moz-transform: translate3d(0, 0, 0);
+  -ms-transform: translate3d(0, 0, 0);
+  -o-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
+}
+
+.slick-track {
+  position: relative;
+  top: 0;
+  left: 0;
+
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+.slick-track:before,
+.slick-track:after {
+  display: table;
+  content: "";
+}
+.slick-track:after {
+  clear: both;
+}
+.slick-loading .slick-track {
+  visibility: hidden;
+}
+
+.slick-slide {
+  display: none;
+  float: left;
+
+  height: 100%;
+  min-height: 1px;
+}
+[dir="rtl"] .slick-slide {
+  float: right;
+}
+.slick-slide img {
+  display: block;
+}
+.slick-slide.slick-loading img {
+  display: none;
+}
+.slick-slide.dragging img {
+  pointer-events: none;
+}
+.slick-initialized .slick-slide {
+  display: block;
+}
+.slick-loading .slick-slide {
+  visibility: hidden;
+}
+.slick-vertical .slick-slide {
+  display: block;
+
+  height: auto;
+
+  border: 1px solid transparent;
+}
+.slick-arrow.slick-hidden {
+  display: none;
+}
+
+/* End Slick Slider CSS */
+
+p.mb-0 {
+  font-size: 16px;
+  font-weight: normal;
+}
+.where-be {
+  max-width: 570px;
+  width: 600px;
+  position: fixed;
+  z-index: 0;
+}
+/* 
+.whislist {
+  float: right;
+  border: solid #ccc 1px;
+  border-radius: 30px;
+  padding: 6px 8px;
+} */
+.whislistlist {
+  float: right;
+  border: solid #ccc 1px;
+  border-radius: 30px;
+  padding: 3px 8px;
+}
+.price {
+  float: right;
+  border: solid #ccc 1px;
+  border-radius: 30px;
+  padding: 3px 8px;
+  margin-top: -15px;
+}
+
+.dolar {
+  float: right;
+  padding: 0px 15px;
+}
+.white {
+  z-index: 1;
+  background: #fff;
+  position: relative;
+}
+
+.location a {
+  color: #111111;
+  text-decoration: none;
+}
+.circle-search a {
+  text-decoration: none;
+  display: block;
+  color: #333333;
+  padding: 0 10px;
+}
+.circle-search {
+  transition: 0.3s ease-in-out;
+}
+.circle-search:hover {
+  border: solid #000 1px;
+  color: #000;
+  background: #f8f8f8;
+}
+
+.activ,
+.circle-search:hover {
+  border: solid #000 1px;
+  color: #000;
+  background: #f8f8f8;
+  font-weight: normal;
+}
+footer {
+  position: relative;
+}
+
+@media (max-width: 929px) {
+  .slick-slider {
+    max-width: 95%;
+  }
+  main .fs-18{
+    font-size: 16px;
+  }
+  main .fs-30{
+    font-size: 26px;
+  }
+  .fs-sm-12{
+    font-size: 12px !important;
+  }
+  .fs-sm-14{
+    font-size: 14px !important;
+  }
+  .fs-sm-16{
+    font-size: 16px !important;
+  }
+ 
+  .rating{
+    border: none !important;
+  }
+}

@@ -1,0 +1,102 @@
+.calendarPair {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  width: 100%;
+  text-align: center;
+}
+.custom-calendar {
+/*  display: none;*/
+}
+.navigation {
+  display: flex;
+  justify-content: space-between;
+  position: absolute;
+  top: 47px;
+  left: 54px;
+  width: calc(100% - 108px);
+}
+.navigation button {
+  display: block;
+  background-repeat: no-repeat;
+  background-size: 6px;
+  background-position: center;
+  background-color: transparent;
+  border: none;
+  width: 20px;
+  height: 20px;
+  text-indent: -9999px;  
+}
+.navigation .prevMonth {
+  background-image: url(../images/arrow-left.png);
+}
+.navigation .nextMonth {
+  background-image: url(../images/arrow-right.png); 
+}
+.navigation .prevMonth:disabled {
+  opacity: 0;
+}
+.custom-calendar .monthYear {
+  font-size: 16px;
+  font-weight: 700;
+  padding-bottom: 10px;
+}
+.custom-calendar table {
+  width: 100%;
+}
+.custom-calendar th, 
+.custom-calendar td {
+  color: #000000;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 41.25px;
+}
+.custom-calendar th {
+  color: #A1A1A1;
+}
+.custom-calendar td:not(:empty) {
+  cursor: pointer;
+  color: #000000;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all .3s ease;
+}
+.custom-calendar td span {
+  display: block;
+  border-radius: 50%;
+  line-height: 50px;
+  width: 50px;
+  height: 50px;
+}
+.custom-calendar td span:hover:not(:empty) {
+  background-color: #000000;
+  color: #FFFFFF;
+}
+.custom-calendar .selected {
+  background-color: #000000;
+  color: #FFFFFF;
+}
+.custom-calendar td.disabled {
+  color: #BDBDBD;
+  pointer-events: none;
+}
+.custom-calendar td.disabled:hover {
+  background-color: #FFFFFF;
+  color: #BDBDBD;
+}
+
+.custom-calendar td.start-date span,
+.custom-calendar td.end-date  span{
+  background-color: #000000;
+  color: #FFFFFF;
+}
+.custom-calendar td.in-range span {
+  background-color: #F9FAFB;
+  border-radius: 0;
+}
+.custom-calendar td.in-range span:hover {
+  background-color: #F9FAFB;
+  color: #000000;
+  outline: 1px solid #000;
+  border-radius: 50%;
+}
