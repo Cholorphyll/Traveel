@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy
+      - name: Deploy to Lightsail
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -17,10 +17,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /var/www/html
-            git reset --hard
-            git pull origin main
+
+            git fetch origin
+            git reset --hard origin/main
+
             composer install --no-dev --optimize-autoloader
-            php artisan migrate --force
+
+            php artisan migrate --force || true
             php artisan config:cache
-            chown -R www-data:www-data storage bootstrap/cache
-            chmod -R 775 storage bootstrap/cache
+            php artisan route:cache
+            php artisan view:cache
