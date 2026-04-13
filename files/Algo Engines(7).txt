@@ -1,0 +1,1531 @@
+﻿Absolutely — Module 9 should be the place where “candidate scoring” becomes precise and slot-specific, rather than trying to make one universal score solve everything.
+That’s the right architecture.
+Your earlier broad feed score should not decide the final winner directly.
+Instead, it should become:
+MODULE 9 — SLOT RANKING ENGINE
+Final Implementation Spec
+Purpose: Choose the best exact item or exact collection inside the slot type already selected by the Sequence Planner.
+This module answers:
+“Now that we know what kind of thing should come next… which exact candidate is best for this slot right now?”
+________________
+
+
+9.0 Core Principle
+Earlier engines produce:
+* relevance
+* structural role suitability
+* opportunity
+* action horizon
+* route fit
+* sequence fit
+* comfort fit
+* etc.
+But those signals are not final ranking.
+Instead, Slot Ranking Engine does this:
+Step 1
+Take all candidates already allowed into the current feed state.
+Step 2
+Restrict them to the slot class being filled:
+* Anchor slot
+* Hero slot
+* Recovery slot
+* Do Soon slot
+* Need-State collection slot
+* Reassurance slot
+* Transition slot
+* Local Discovery slot
+* Buffer / Flex slot
+* etc.
+Step 3
+Apply a slot-specific ranking formula.
+Step 4
+Apply hard eligibility gates and diversity penalties.
+Step 5
+Return:
+* top winner (or top collection)
+* explanation metadata
+* runner-ups for fallback
+________________
+
+
+9.1 What This Module Receives
+This engine should run after:
+* Context Engine
+* Opportunity Engine
+* Action Horizon Engine
+* Role Assignment Engine
+* Route Engine
+* Sequence Planner
+So each candidate should already have enriched signals like:
+* base_relevance_score
+* structural_importance
+* trip_progress_value
+* context_fit
+* route_fit
+* distance_m
+* travel_time_min
+* timing_fit
+* fatigue_compatibility
+* opportunity_score
+* recovery_value
+* do_now_score
+* do_soon_score
+* trip_important_score
+* need_state_match
+* scenic_quality
+* ease_of_access
+* review_strength
+* uniqueness
+* logistics_feasibility
+* etc.
+That means Module 9 should not invent meaning.
+It should consume normalized signals and rank with discipline.
+________________
+
+
+9.2 Output of Slot Ranking Engine
+Each run should output:
+A) Winner row
+The selected item / collection.
+B) Ranked alternatives
+Top N fallback candidates.
+C) Score breakdown
+For explainability and debugging.
+D) Slot-specific decision metadata
+Such as:
+* why it won
+* why others lost
+* any penalties applied
+* collection composition (if collection slot)
+________________
+
+
+9.3 Recommended Tables
+________________
+
+
+TABLE A — feed_slot_candidates
+This is the working candidate table for the current feed moment.
+CREATE TABLE feed_slot_candidates (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(100) NOT NULL,
+    trip_id BIGINT NULL,
+    feed_moment_id BIGINT NOT NULL,
+    slot_type VARCHAR(100) NOT NULL,
+
+
+    candidate_type VARCHAR(50) NOT NULL, 
+    -- sight / restaurant / experience / area / collection / hotel / viewpoint / beach / market etc.
+
+
+    candidate_id BIGINT NULL,
+    collection_id BIGINT NULL,
+
+
+    area_id BIGINT NULL,
+    anchor_id BIGINT NULL,
+
+
+    -- inherited normalized signals
+    base_relevance_score DECIMAL(8,4) DEFAULT 0,
+    structural_importance DECIMAL(8,4) DEFAULT 0,
+    trip_progress_value DECIMAL(8,4) DEFAULT 0,
+    context_fit DECIMAL(8,4) DEFAULT 0,
+    route_fit DECIMAL(8,4) DEFAULT 0,
+    proximity_score DECIMAL(8,4) DEFAULT 0,
+    timing_fit DECIMAL(8,4) DEFAULT 0,
+    fatigue_compatibility DECIMAL(8,4) DEFAULT 0,
+    opportunity_score DECIMAL(8,4) DEFAULT 0,
+    recovery_value DECIMAL(8,4) DEFAULT 0,
+    do_now_score DECIMAL(8,4) DEFAULT 0,
+    do_soon_score DECIMAL(8,4) DEFAULT 0,
+    trip_important_score DECIMAL(8,4) DEFAULT 0,
+    need_state_match DECIMAL(8,4) DEFAULT 0,
+    scenic_quality DECIMAL(8,4) DEFAULT 0,
+    ease_of_access DECIMAL(8,4) DEFAULT 0,
+    dwell_quality DECIMAL(8,4) DEFAULT 0,
+    review_strength DECIMAL(8,4) DEFAULT 0,
+    uniqueness DECIMAL(8,4) DEFAULT 0,
+    logistics_feasibility DECIMAL(8,4) DEFAULT 0,
+    popularity_score DECIMAL(8,4) DEFAULT 0,
+    area_energy_fit DECIMAL(8,4) DEFAULT 0,
+    current_comfort_fit DECIMAL(8,4) DEFAULT 0,
+    ease_of_choice DECIMAL(8,4) DEFAULT 0,
+
+
+    -- route / operational
+    distance_m INT NULL,
+    travel_time_min INT NULL,
+    detour_cost_score DECIMAL(8,4) DEFAULT 0,
+
+
+    -- eligibility
+    is_eligible TINYINT(1) DEFAULT 1,
+    eligibility_reason TEXT NULL,
+
+
+    -- penalties
+    repetition_penalty DECIMAL(8,4) DEFAULT 0,
+    redundancy_penalty DECIMAL(8,4) DEFAULT 0,
+    oversaturation_penalty DECIMAL(8,4) DEFAULT 0,
+    fatigue_penalty DECIMAL(8,4) DEFAULT 0,
+
+
+    -- final
+    slot_score_raw DECIMAL(8,4) DEFAULT 0,
+    slot_penalty_total DECIMAL(8,4) DEFAULT 0,
+    slot_score_final DECIMAL(8,4) DEFAULT 0,
+
+
+    rank_position INT NULL,
+    selected TINYINT(1) DEFAULT 0,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_session_slot (session_id, feed_moment_id, slot_type),
+    INDEX idx_candidate (candidate_type, candidate_id),
+    INDEX idx_selected (session_id, feed_moment_id, selected)
+);
+
+
+________________
+
+
+TABLE B — feed_slot_score_breakdown
+This is essential for debugging and tuning.
+CREATE TABLE feed_slot_score_breakdown (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(100) NOT NULL,
+    feed_moment_id BIGINT NOT NULL,
+    slot_type VARCHAR(100) NOT NULL,
+
+
+    candidate_type VARCHAR(50) NOT NULL,
+    candidate_id BIGINT NULL,
+    collection_id BIGINT NULL,
+
+
+    factor_name VARCHAR(100) NOT NULL,
+    factor_value DECIMAL(8,4) DEFAULT 0,
+    factor_weight DECIMAL(8,4) DEFAULT 0,
+    weighted_contribution DECIMAL(8,4) DEFAULT 0,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_lookup (session_id, feed_moment_id, slot_type, candidate_type, candidate_id)
+);
+
+
+________________
+
+
+TABLE C — slot_type_formula_config
+Optional but strongly recommended so you can tune weights without rewriting code.
+CREATE TABLE slot_type_formula_config (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    slot_type VARCHAR(100) NOT NULL,
+    factor_name VARCHAR(100) NOT NULL,
+    factor_weight DECIMAL(8,4) NOT NULL,
+    active TINYINT(1) DEFAULT 1,
+    version_tag VARCHAR(50) DEFAULT 'v1',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_slot_factor (slot_type, factor_name, version_tag)
+);
+
+
+________________
+
+
+9.4 Universal Ranking Pipeline
+Every slot should follow the same 6-stage pipeline.
+________________
+
+
+Stage 1 — Candidate Pool Restriction
+Only allow candidates that are valid for this slot.
+Example:
+* Anchor slot → only major structural anchors / anchor-compatible collections
+* Recovery slot → only low-friction, restorative, decompression-friendly candidates
+* Hero slot → only unusually high-opportunity or “trip-defining” items
+* Need-State collection slot → only collection-capable clusters
+________________
+
+
+Stage 2 — Hard Eligibility Gates
+Before scoring, eliminate things that simply should not compete.
+Examples:
+* closed right now
+* too far for current time window
+* impossible detour
+* already completed
+* duplicates nearby
+* violates current fatigue threshold
+* low confidence item
+* weak review floor for food slot
+These should set:
+is_eligible = 0
+eligibility_reason = 'closed_now'
+
+
+________________
+
+
+Stage 3 — Slot Formula Scoring
+Each slot gets a custom weighted formula.
+This is the main ranking score.
+________________
+
+
+Stage 4 — Penalty Layer
+After scoring, apply penalties for:
+* repetition
+* category oversaturation
+* “too similar to previous items”
+* route awkwardness
+* fatigue mismatch
+* feed monotony
+________________
+
+
+Stage 5 — Tie-Breaking
+If final scores are close:
+1. Lower travel friction wins
+2. Higher structural value wins
+3. Higher review strength wins
+4. Higher uniqueness wins
+5. Lower uncertainty wins
+________________
+
+
+Stage 6 — Winner + Fallbacks
+Store:
+* winner
+* next 3–10 alternatives
+* score breakdown
+________________
+
+
+9.5 Required Signal Philosophy
+Before formulas, define how each field should be interpreted.
+Every slot score should use normalized fields:
+Standard normalization:
+All scoring fields should be in:
+0.0000 → 1.0000
+
+
+Where:
+* 0 = poor / irrelevant
+* 1 = ideal for this signal
+This is critical because weighted formulas become interpretable.
+________________
+
+
+9.6 Master Signal Dictionary for Slot Ranking
+Now the important part:
+what every required field means, how to calculate it, and how to populate it.
+________________
+
+
+9.6.1 base_relevance_score
+Meaning
+This is the carry-forward score from your earlier global ranking / feed suitability engine.
+It is not final ranking anymore.
+It is only the candidate’s general worthiness in the current trip state.
+What it should represent
+A blended prior of:
+* user intent match
+* destination relevance
+* popularity
+* quality
+* travel usefulness
+* broad situational relevance
+Recommended formula
+If you already have it, reuse it. Otherwise:
+base_relevance_score =
+ 0.20 * popularity_score
++0.15 * review_strength
++0.15 * uniqueness
++0.15 * structural_importance
++0.10 * context_fit
++0.10 * route_fit
++0.10 * trip_important_score
++0.05 * timing_fit
+
+
+SQL population example
+UPDATE feed_slot_candidates
+SET base_relevance_score =
+    (
+      0.20 * popularity_score +
+      0.15 * review_strength +
+      0.15 * uniqueness +
+      0.15 * structural_importance +
+      0.10 * context_fit +
+      0.10 * route_fit +
+      0.10 * trip_important_score +
+      0.05 * timing_fit
+    );
+
+
+________________
+
+
+9.6.2 structural_importance
+Meaning
+How much this candidate matters to the trip’s skeleton, not just as a nice option.
+This answers:
+“If the user skipped this, would the day / area / city feel structurally incomplete?”
+High structural importance examples
+* Eiffel Tower in Paris
+* Colosseum in Rome
+* main old town district
+* iconic seafront
+* signature bazaar
+* main cathedral / main square
+* “you came here for this” item
+Low structural importance examples
+* random coffee stop
+* minor alley mural
+* average dessert shop
+* generic side museum
+How to calculate it
+Use:
+* popularity percentile within city
+* landmark significance
+* “anchor” classification
+* review count dominance
+* itinerary centrality
+* appearance frequency in top city guides (optional)
+* role assignment output
+Good formula
+structural_importance =
+ 0.35 * anchor_probability
++0.25 * city_popularity_percentile
++0.20 * review_volume_strength
++0.10 * uniqueness
++0.10 * district_centrality
+
+
+Field sub-definitions
+anchor_probability
+Probability this item behaves as a trip anchor.
+Can come from Role Assignment Engine.
+city_popularity_percentile
+Popularity rank among same-city items.
+review_volume_strength
+Normalized review count strength.
+district_centrality
+How central this item is within tourist movement clusters.
+Example SQL
+UPDATE feed_slot_candidates f
+JOIN candidate_features c
+  ON f.candidate_type = c.candidate_type
+ AND f.candidate_id = c.candidate_id
+SET f.structural_importance =
+    (
+      0.35 * c.anchor_probability +
+      0.25 * c.city_popularity_percentile +
+      0.20 * c.review_volume_strength +
+      0.10 * c.uniqueness_score +
+      0.10 * c.district_centrality
+    );
+
+
+________________
+
+
+9.6.3 trip_progress_value
+Meaning
+How much this candidate advances the trip meaningfully right now.
+This is not “good in general.”
+It is:
+“Does doing this now move the traveler forward in the journey?”
+High trip progress examples
+* entering the old town after arrival
+* reaching the main viewpoint before sunset
+* doing the key museum before closing
+* eating before a long route segment
+* picking up transport before departure
+Low trip progress examples
+* a random souvenir shop while still hungry and far from the anchor
+* minor detour before major unfinished anchors
+Formula
+trip_progress_value =
+ 0.30 * anchor_advancement
++0.20 * sequence_alignment
++0.20 * route_position_value
++0.15 * urgency_alignment
++0.15 * completion_contribution
+
+
+How to derive sub-signals
+anchor_advancement
+Does this move the user toward current / next anchor?
+sequence_alignment
+How well this matches the expected next feed phase.
+route_position_value
+Is it well placed in the current movement arc?
+urgency_alignment
+Does it become less useful later?
+completion_contribution
+Does it help complete a district / cluster / trip chapter?
+SQL example
+UPDATE feed_slot_candidates
+SET trip_progress_value =
+    (
+      0.30 * anchor_advancement +
+      0.20 * sequence_alignment +
+      0.20 * route_position_value +
+      0.15 * urgency_alignment +
+      0.15 * completion_contribution
+    );
+
+
+________________
+
+
+9.6.4 context_fit
+Meaning
+How appropriate this candidate is for the current moment conditions.
+This answers:
+“Does this make sense right now, given weather, time, mood, density, pace, energy, and surroundings?”
+Inputs
+* weather
+* local crowd density
+* time of day
+* current pace
+* current fatigue
+* rain / heat / wind
+* indoor/outdoor fit
+* lighting / atmosphere suitability
+* user movement mode
+Formula
+context_fit =
+ 0.20 * weather_fit
++0.20 * time_of_day_fit
++0.15 * crowd_fit
++0.15 * mood_fit
++0.10 * environment_fit
++0.10 * mobility_fit
++0.10 * comfort_fit
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET context_fit =
+    (
+      0.20 * weather_fit +
+      0.20 * time_of_day_fit +
+      0.15 * crowd_fit +
+      0.15 * mood_fit +
+      0.10 * environment_fit +
+      0.10 * mobility_fit +
+      0.10 * comfort_fit
+    );
+
+
+________________
+
+
+9.6.5 proximity_score
+Meaning
+How geographically convenient this candidate is right now.
+This is not raw distance.
+It is a normalized “closeness utility.”
+Formula
+Best done as a piecewise decay rather than linear.
+Walking-city example
+0–300m     = 1.00
+301–700m   = 0.85
+701–1200m  = 0.65
+1201–2000m = 0.40
+2000m+     = 0.15
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET proximity_score =
+    CASE
+        WHEN distance_m <= 300 THEN 1.00
+        WHEN distance_m <= 700 THEN 0.85
+        WHEN distance_m <= 1200 THEN 0.65
+        WHEN distance_m <= 2000 THEN 0.40
+        ELSE 0.15
+    END;
+
+
+You can also make this dynamic by city mode:
+* old town walking city
+* spread-out car city
+* island / beach destination
+* mountain route destination
+________________
+
+
+9.6.6 timing_fit
+Meaning
+How well the candidate fits the current and near-future time window.
+This answers:
+“Is this well-timed right now?”
+Examples of high timing fit
+* breakfast at 8:30 AM
+* viewpoint at golden hour
+* museum with 2.5h before closing
+* dinner area around 7 PM
+* beach during daylight
+Examples of low timing fit
+* brunch at 4 PM
+* viewpoint after darkness
+* museum 15 minutes before close
+* nightlife at 2 PM
+Formula
+timing_fit =
+ 0.30 * opening_window_fit
++0.25 * ideal_time_of_day_fit
++0.20 * remaining_time_adequacy
++0.15 * temporal_opportunity_fit
++0.10 * meal_window_fit
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET timing_fit =
+    (
+      0.30 * opening_window_fit +
+      0.25 * ideal_time_of_day_fit +
+      0.20 * remaining_time_adequacy +
+      0.15 * temporal_opportunity_fit +
+      0.10 * meal_window_fit
+    );
+
+
+________________
+
+
+9.6.7 fatigue_compatibility
+Meaning
+How appropriate this candidate is for the user’s current likely energy state.
+This answers:
+“Given how the traveler probably feels now… is this a good fit?”
+Inputs
+* walking already done
+* recent dwell load
+* heat / weather drain
+* current time
+* previous feed intensity
+* expected effort of candidate
+Formula
+fatigue_compatibility =
+ 1 - ABS(current_fatigue_level - candidate_energy_demand)
+
+
+Where both are normalized 0–1.
+Clamp to 0–1.
+Example
+If:
+* current fatigue = 0.80
+* candidate demand = 0.20
+Then this might actually be good for a recovery slot, but poor for an anchor slot.
+So use carefully.
+A better practical version:
+fatigue_compatibility =
+ 1 - MAX(0, candidate_energy_demand - current_energy_capacity)
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET fatigue_compatibility =
+    GREATEST(0, 1 - GREATEST(0, candidate_energy_demand - current_energy_capacity));
+
+
+________________
+
+
+9.6.8 opportunity_score
+Meaning
+How unusually important this candidate becomes because of a temporary window.
+This is the core output of Opportunity Engine.
+This answers:
+“Is this especially worth surfacing now because the window is unusually good?”
+High opportunity examples
+* sunset viewpoint 35 minutes away
+* clear visibility mountain deck
+* live market only active this hour
+* tide-revealed beach access
+* nightlife area becoming active now
+Formula
+Already should come from Module 4, but if needed:
+opportunity_score =
+ 0.30 * temporal_window_strength
++0.25 * condition_window_strength
++0.20 * rarity_of_window
++0.15 * perishability
++0.10 * trip_payoff
+
+
+________________
+
+
+9.6.9 recovery_value
+Meaning
+How restorative / decompressing / low-friction this candidate is.
+This is very important and often under-modeled.
+This answers:
+“Will this help the traveler feel better, calmer, or reset?”
+High recovery examples
+* scenic waterfront walk
+* shaded café cluster
+* seated dessert stop
+* park bench view
+* calm indoor gallery after heavy walking
+* beach chill window
+Low recovery examples
+* crowded queue-heavy attraction
+* confusing bazaar navigation
+* high-stimulation nightlife area
+* uphill climb in midday heat
+Formula
+recovery_value =
+ 0.25 * seating_availability
++0.20 * low_effort_access
++0.15 * shade_or_shelter
++0.15 * sensory_softness
++0.15 * dwell_comfort
++0.10 * scenic_soothing_quality
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET recovery_value =
+    (
+      0.25 * seating_availability +
+      0.20 * low_effort_access +
+      0.15 * shade_or_shelter +
+      0.15 * sensory_softness +
+      0.15 * dwell_comfort +
+      0.10 * scenic_soothing_quality
+    );
+
+
+________________
+
+
+9.6.10 do_soon_score
+Meaning
+How important this candidate is soon, but not necessarily this exact second.
+This is a horizon field from Action Horizon Engine.
+This answers:
+“This may not be the immediate next thing — but should it be kept near the top very soon?”
+Formula
+Should come from Module 5, but can be:
+do_soon_score =
+ 0.35 * near_term_relevance
++0.25 * future_window_quality
++0.20 * trip_dependency
++0.20 * route_compatibility
+
+
+________________
+
+
+9.6.11 trip_important_score
+Meaning
+How much the candidate matters to the overall trip narrative, not just now.
+This is the “don’t accidentally bury this forever” score.
+Formula
+trip_important_score =
+ 0.30 * structural_importance
++0.25 * uniqueness
++0.20 * destination_signature_value
++0.15 * memory_value
++0.10 * review_strength
+
+
+________________
+
+
+9.6.12 need_state_match
+Meaning
+How strongly this candidate (or collection) matches the traveler’s immediate practical / emotional need.
+This is critical for:
+* food moments
+* restroom / pause moments
+* “I need a break”
+* “I need an easy win”
+* “I need a nice dinner area”
+* “I need something indoors”
+* “I need something fun but not exhausting”
+Common need states
+* hungry
+* thirsty
+* tired
+* overstimulated
+* heat escape
+* shelter
+* scenic decompression
+* quick win
+* social energy
+* family ease
+* romantic atmosphere
+* low-commitment browsing
+Formula
+need_state_match =
+ 0.35 * primary_need_fit
++0.20 * secondary_need_fit
++0.15 * friction_relief
++0.15 * emotional_fit
++0.15 * practical_fit
+
+
+________________
+
+
+9.6.13 scenic_quality
+Meaning
+How visually / atmospherically rewarding the candidate is.
+Formula
+scenic_quality =
+ 0.30 * view_quality
++0.20 * photogenic_strength
++0.20 * ambient_beauty
++0.15 * environmental_distinctiveness
++0.15 * sensory_reward
+
+
+________________
+
+
+9.6.14 ease_of_access
+Meaning
+How easy it is to actually execute this candidate with low friction.
+This is broader than proximity.
+Includes
+* navigation simplicity
+* no reservation dependency
+* easy entry
+* no steep climb
+* not confusing
+* low queue burden
+* low transfer burden
+Formula
+ease_of_access =
+ 0.25 * route_simplicity
++0.20 * low_queue_probability
++0.20 * entry_ease
++0.15 * mobility_friendliness
++0.10 * low_reservation_dependency
++0.10 * low_cognitive_load
+
+
+________________
+
+
+9.6.15 dwell_quality
+Meaning
+How pleasant it is to spend time there once arrived.
+This is important for:
+* recovery slots
+* café / plaza / waterfront
+* need-state collections
+* area-level decisions
+Formula
+dwell_quality =
+ 0.25 * comfort
++0.20 * atmosphere
++0.20 * seating_quality
++0.15 * stayability
++0.10 * service_ease
++0.10 * sensory_quality
+
+
+________________
+
+
+9.6.16 review_strength
+Meaning
+How strong the quality confidence is, combining rating and review volume.
+This should not just be raw average rating.
+Better formula
+review_strength =
+ 0.60 * bayesian_rating_score
++0.40 * review_volume_strength
+
+
+Bayesian rating score
+Recommended:
+bayesian_rating =
+((v / (v + m)) * R) + ((m / (v + m)) * C)
+
+
+Where:
+* R = candidate average rating
+* v = review count
+* C = global average rating
+* m = minimum reviews threshold (e.g. 100)
+Then normalize to 0–1.
+SQL example
+UPDATE candidate_features
+SET bayesian_rating_score =
+    (
+      ((review_count / (review_count + 100.0)) * avg_rating) +
+      ((100.0 / (review_count + 100.0)) * 4.2)
+    ) / 5.0;
+
+
+Then:
+UPDATE feed_slot_candidates f
+JOIN candidate_features c
+  ON f.candidate_type = c.candidate_type
+ AND f.candidate_id = c.candidate_id
+SET f.review_strength =
+    (0.60 * c.bayesian_rating_score) +
+    (0.40 * c.review_volume_strength);
+
+
+________________
+
+
+9.6.17 uniqueness
+Meaning
+How non-generic / destination-specific / irreplaceable this candidate is.
+This answers:
+“Would this feel like this place, or could it be anywhere?”
+Formula
+uniqueness =
+ 0.30 * destination_specificity
++0.25 * replacement_difficulty
++0.20 * cultural_distinctiveness
++0.15 * memory_value
++0.10 * rarity
+
+
+________________
+
+
+9.6.18 logistics_feasibility
+Meaning
+How realistically executable this candidate is right now.
+This is “can the user actually do this without pain?”
+Formula
+logistics_feasibility =
+ 0.25 * open_now_fit
++0.20 * route_fit
++0.20 * access_reliability
++0.15 * time_budget_fit
++0.10 * queue_risk_inverse
++0.10 * reservation_feasibility
+
+
+________________
+
+
+9.6.19 popularity_score
+Meaning
+How socially validated / broadly preferred this candidate is in the destination.
+This is useful, but should never dominate all slots.
+Formula
+popularity_score =
+ 0.45 * city_review_count_percentile
++0.25 * save_rate_or_engagement
++0.15 * guidebook_frequency
++0.15 * local prominence
+
+
+________________
+
+
+9.6.20 area_energy_fit
+Meaning
+How well this candidate or collection matches the desired environmental intensity right now.
+This matters especially for:
+* food collections
+* browsing areas
+* nightlife clusters
+* recovery areas
+* strolling districts
+Formula
+area_energy_fit =
+ 1 - ABS(current_desired_energy - candidate_area_energy)
+
+
+Clamp 0–1.
+________________
+
+
+9.6.21 current_comfort_fit
+Meaning
+How physically and psychologically comfortable this option feels for the current moment.
+This is broader than recovery value.
+Includes:
+* weather comfort
+* crowd comfort
+* stimulation comfort
+* body comfort
+* navigational ease
+Formula
+current_comfort_fit =
+ 0.25 * thermal_comfort
++0.20 * crowd_comfort
++0.20 * sensory_comfort
++0.20 * movement_comfort
++0.15 * pace_comfort
+
+
+________________
+
+
+9.6.22 ease_of_choice
+Meaning
+How easy it is for the user to choose confidently within this option or collection.
+This is especially important for collection slots.
+This answers:
+“Will this create easy momentum or frustrating decision fatigue?”
+High ease of choice examples
+* small, high-confidence food cluster
+* compact promenade with 5 strong options
+* curated brunch area
+* “pick any of these, they all work” zone
+Low ease of choice examples
+* giant chaotic district with 400 mixed-quality options
+* collection with too many weakly differentiated items
+Formula
+ease_of_choice =
+ 0.30 * option_clarity
++0.25 * quality_consistency
++0.20 * collection_compactness
++0.15 * decision_confidence
++0.10 * low_noise_ratio
+
+
+________________
+
+
+9.7 Slot-Specific Final Scoring Formulas
+Now we apply different formulas for different slot types.
+This is the real heart of Module 9.
+________________
+
+
+9.7.1 Anchor Slot
+Purpose
+Choose the best structural next anchor.
+Formula
+anchor_slot_score =
+ 0.22 * structural_importance
++0.18 * trip_progress_value
++0.14 * context_fit
++0.12 * proximity_score
++0.10 * timing_fit
++0.10 * fatigue_compatibility
++0.08 * logistics_feasibility
++0.06 * uniqueness
+
+
+Why improved from your earlier version
+I’d slightly reduce pure structure dominance and add:
+* logistics_feasibility
+* uniqueness
+Because some anchors are theoretically important but practically poor right now.
+SQL
+UPDATE feed_slot_candidates
+SET slot_score_raw =
+    (
+      0.22 * structural_importance +
+      0.18 * trip_progress_value +
+      0.14 * context_fit +
+      0.12 * proximity_score +
+      0.10 * timing_fit +
+      0.10 * fatigue_compatibility +
+      0.08 * logistics_feasibility +
+      0.06 * uniqueness
+    )
+WHERE slot_type = 'ANCHOR';
+
+
+________________
+
+
+9.7.2 Hero Slot
+Purpose
+Choose the most trip-worthy, unusually strong, “surface this now” item.
+Formula
+hero_slot_score =
+ 0.28 * opportunity_score
++0.16 * uniqueness
++0.14 * trip_important_score
++0.14 * logistics_feasibility
++0.12 * review_strength
++0.08 * scenic_quality
++0.08 * timing_fit
+
+
+Why
+Hero slots should feel:
+* special
+* worth interrupting the normal flow for
+* high payoff
+SQL
+UPDATE feed_slot_candidates
+SET slot_score_raw =
+    (
+      0.28 * opportunity_score +
+      0.16 * uniqueness +
+      0.14 * trip_important_score +
+      0.14 * logistics_feasibility +
+      0.12 * review_strength +
+      0.08 * scenic_quality +
+      0.08 * timing_fit
+    )
+WHERE slot_type = 'HERO';
+
+
+________________
+
+
+9.7.3 Do Soon Slot
+Purpose
+Choose the best “not this second, but should stay near top” candidate.
+Formula
+do_soon_slot_score =
+ 0.30 * do_soon_score
++0.22 * trip_important_score
++0.14 * structural_importance
++0.12 * context_fit
++0.10 * popularity_score
++0.07 * timing_fit
++0.05 * route_fit
+
+
+________________
+
+
+9.7.4 Recovery Slot
+Purpose
+Choose the best decompression / reset move.
+Formula
+recovery_slot_score =
+ 0.26 * recovery_value
++0.18 * context_fit
++0.16 * ease_of_access
++0.14 * scenic_quality
++0.10 * dwell_quality
++0.08 * timing_fit
++0.08 * current_comfort_fit
+
+
+________________
+
+
+9.7.5 Need-State Collection Slot
+Purpose
+Choose the best choice set, not just the best single item.
+This is extremely important and you were right to add it.
+Formula
+need_state_collection_score =
+ 0.28 * need_state_match
++0.18 * route_fit
++0.14 * context_fit
++0.14 * area_energy_fit
++0.12 * ease_of_choice
++0.08 * current_comfort_fit
++0.06 * review_strength
+
+
+Important note
+This slot should usually rank:
+* areas
+* micro-clusters
+* curated collections
+* district slices
+—not just individual POIs.
+________________
+
+
+9.7.6 Reassurance Slot (Recommended addition)
+This is important for travel UX.
+Purpose
+Surface something that reassures the user the trip is “on track.”
+Examples:
+   * “You’re near the main district”
+   * “Good dinner area ahead”
+   * “Your major must-sees are covered”
+   * “This next move keeps the day coherent”
+Formula
+reassurance_slot_score =
+ 0.30 * trip_important_score
++0.20 * route_fit
++0.15 * structural_importance
++0.15 * context_fit
++0.10 * logistics_feasibility
++0.10 * current_comfort_fit
+
+
+________________
+
+
+9.7.7 Transition Slot (Recommended addition)
+Purpose
+Pick the best low-commitment move between major moments.
+Examples:
+   * scenic lane
+   * quick square
+   * small browse street
+   * coffee-on-the-way stop
+   * mini viewpoint
+Formula
+transition_slot_score =
+ 0.24 * route_fit
++0.18 * proximity_score
++0.14 * timing_fit
++0.14 * ease_of_access
++0.12 * scenic_quality
++0.10 * context_fit
++0.08 * fatigue_compatibility
+
+
+________________
+
+
+9.7.8 Local Discovery Slot (Recommended addition)
+Purpose
+Surface something “worth discovering” that is not necessarily a structural anchor.
+Examples:
+   * charming hidden lane
+   * strong bakery cluster
+   * local market pocket
+   * authentic neighborhood stop
+Formula
+local_discovery_slot_score =
+ 0.22 * uniqueness
++0.18 * context_fit
++0.14 * route_fit
++0.12 * review_strength
++0.12 * scenic_quality
++0.12 * trip_progress_value
++0.10 * ease_of_access
+
+
+________________
+
+
+9.8 Penalty Layer (Very Important)
+Without penalties, the engine will over-select:
+   * same category repeatedly
+   * same energy repeatedly
+   * same district repeatedly
+   * similar experiences repeatedly
+That makes feeds feel robotic.
+________________
+
+
+9.8.1 repetition_penalty
+Meaning
+Penalty for repeating similar item types too soon.
+Example logic
+If last 3 items already include:
+   * 2 museums → penalize another museum
+   * 2 cafés → penalize another café
+   * 2 viewpoints → penalize another viewpoint
+Formula
+repetition_penalty =
+ min(0.25, recent_type_repeat_count * 0.08)
+
+
+SQL example
+UPDATE feed_slot_candidates
+SET repetition_penalty =
+    LEAST(0.25, recent_type_repeat_count * 0.08);
+
+
+________________
+
+
+9.8.2 redundancy_penalty
+Meaning
+Penalty if candidate is too similar to recently surfaced options.
+Examples:
+   * same kind of church
+   * same waterfront photo stop
+   * same brunch style
+   * same market experience
+Formula
+redundancy_penalty =
+ 0.5 * semantic_similarity_to_recent
+
+
+Where similarity is normalized 0–1.
+________________
+
+
+9.8.3 oversaturation_penalty
+Meaning
+Penalty if too much of the same district / energy / category has already dominated the feed.
+Formula
+oversaturation_penalty =
+ 0.4 * category_saturation
++0.3 * area_saturation
++0.3 * energy_saturation
+
+
+________________
+
+
+9.8.4 fatigue_penalty
+Meaning
+Penalty if this candidate adds too much effort right now.
+Formula
+fatigue_penalty =
+ GREATEST(0, candidate_energy_demand - current_energy_capacity) * 0.4
+
+
+________________
+
+
+9.8.5 Final Penalty Total
+slot_penalty_total =
+ repetition_penalty
++ redundancy_penalty
++ oversaturation_penalty
++ fatigue_penalty
+
+
+SQL
+UPDATE feed_slot_candidates
+SET slot_penalty_total =
+    repetition_penalty +
+    redundancy_penalty +
+    oversaturation_penalty +
+    fatigue_penalty;
+
+
+________________
+
+
+9.9 Final Slot Score
+slot_score_final =
+ GREATEST(0, slot_score_raw - slot_penalty_total)
+
+
+SQL
+UPDATE feed_slot_candidates
+SET slot_score_final =
+    GREATEST(0, slot_score_raw - slot_penalty_total)
+WHERE is_eligible = 1;
+
+
+For ineligible rows:
+UPDATE feed_slot_candidates
+SET slot_score_final = 0
+WHERE is_eligible = 0;
+
+
+________________
+
+
+9.10 Ranking Query
+SET @r := 0;
+
+
+UPDATE feed_slot_candidates c
+JOIN (
+    SELECT id,
+           (@r := @r + 1) AS rn
+    FROM feed_slot_candidates
+    WHERE session_id = 'abc123'
+      AND feed_moment_id = 17
+      AND slot_type = 'ANCHOR'
+      AND is_eligible = 1
+    ORDER BY slot_score_final DESC,
+             travel_time_min ASC,
+             structural_importance DESC,
+             review_strength DESC,
+             uniqueness DESC
+) ranked
+ON c.id = ranked.id
+SET c.rank_position = ranked.rn;
+
+
+Then winner:
+UPDATE feed_slot_candidates
+SET selected = 1
+WHERE session_id = 'abc123'
+  AND feed_moment_id = 17
+  AND slot_type = 'ANCHOR'
+  AND rank_position = 1;
+
+
+________________
+
+
+9.11 How to Populate Collection Candidates (Very Important)
+For collection slots like:
+   * lunch area
+   * dinner district
+   * browse pocket
+   * recovery cluster
+   * dessert strip
+   * nightlife zone
+You should not score only individual items.
+You should create collection candidates.
+________________
+
+
+Recommended collection table
+CREATE TABLE candidate_collections (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    collection_type VARCHAR(100) NOT NULL,
+    area_id BIGINT NULL,
+    anchor_id BIGINT NULL,
+    title VARCHAR(255),
+    centroid_lat DECIMAL(10,7),
+    centroid_lng DECIMAL(10,7),
+    member_count INT DEFAULT 0,
+
+
+    review_strength DECIMAL(8,4) DEFAULT 0,
+    need_state_match DECIMAL(8,4) DEFAULT 0,
+    ease_of_choice DECIMAL(8,4) DEFAULT 0,
+    area_energy_fit DECIMAL(8,4) DEFAULT 0,
+    current_comfort_fit DECIMAL(8,4) DEFAULT 0,
+    route_fit DECIMAL(8,4) DEFAULT 0,
+    context_fit DECIMAL(8,4) DEFAULT 0,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+________________
+
+
+Collection scoring logic
+A collection score should blend:
+   * top 3 member quality
+   * compactness
+   * option diversity
+   * confidence consistency
+   * route convenience
+Example formulas
+collection_review_strength =
+ 0.50 * avg(top3_review_strength)
++0.25 * median(review_strength)
++0.25 * quality_consistency
+
+
+ease_of_choice =
+ 0.35 * compactness
++0.25 * quality_consistency
++0.20 * low_noise_ratio
++0.20 * option_clarity
+
+
+need_state_match =
+ 0.50 * % of members matching current need
++0.25 * best_member_need_match
++0.25 * practical_relief_fit
+
+
+________________
+
+
+9.12 Hard Eligibility Rules by Slot Type
+This is important. Different slots should reject different things.
+________________
+
+
+Anchor Slot Hard Gates
+Reject if:
+   * closed / inaccessible
+   * route detour too high
+   * already completed
+   * structurally redundant
+   * too weak compared to current anchor
+________________
+
+
+Hero Slot Hard Gates
+Reject if:
+   * opportunity window expired
+   * weak payoff
+   * poor feasibility
+   * too similar to recent hero
+________________
+
+
+Recovery Slot Hard Gates
+Reject if:
+   * high effort
+   * high queue
+   * high crowd
+   * low seating / no relief
+________________
+
+
+Need-State Collection Slot Hard Gates
+Reject if:
+   * too sparse
+   * too confusing
+   * low confidence quality
+   * too far off route
+   * currently mismatched to active need
+________________
+
+
+9.13 Recommended Processing Order in Production
+This should be the runtime sequence for each feed slot fill.
+________________
+
+
+Runtime Flow
+Step 1
+Insert candidate pool into feed_slot_candidates
+Step 2
+Populate inherited signals from prior engines
+Step 3
+Populate slot-specific extra fields if needed
+Step 4
+Apply hard eligibility rules
+Step 5
+Apply slot formula → slot_score_raw
+Step 6
+Apply penalties → slot_penalty_total
+Step 7
+Compute slot_score_final
+Step 8
+Rank
+Step 9
+Select winner + fallback set
+Step 10
+Persist score breakdown
+________________
+
+
+9.14 Strong Recommendation: Don’t Over-Use One Formula Across All Slots
+This is one of the biggest mistakes teams make.
+A single “best POI score” sounds elegant — but it creates bad travel behavior because:
+   * best lunch area ≠ best hero moment
+   * best recovery move ≠ best anchor
+   * best browse cluster ≠ best must-do
+   * best next step ≠ best overall attraction
+That’s exactly why this module is necessary.
+________________
+
+
+9.15 Final Recommended Canonical Slot Score Set
+If you want the production-ready canonical set, I’d recommend these as your primary slot formulas:
+   * ANCHOR
+   * HERO
+   * DO_SOON
+   * RECOVERY
+   * NEED_STATE_COLLECTION
+   * REASSURANCE
+   * TRANSITION
+   * LOCAL_DISCOVERY
+That gives you a much more human travel feed than just “top attractions sorted by score.”
+________________
+
+
+9.16 Best Architectural Interpretation
+So in one sentence:
+Module 9 is not deciding what kind of thing comes next — it is deciding which exact candidate best fulfills the already-decided narrative job.
+That distinction is what makes the system coherent.

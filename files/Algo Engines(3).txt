@@ -1,0 +1,1913 @@
+﻿Module 4 - OPPORTUNITY ENGINE — FULL IMPLEMENTATION READY SPEC
+________________
+
+
+0) WHAT THIS MODULE SHOULD DO
+The Opportunity Engine should answer:
+“Why is this item especially worth surfacing right now?”
+It should temporarily boost candidates when they are unusually relevant due to:
+* time of day
+* weather / environmental conditions
+* operational urgency
+* behavioral practicality
+* human need-state
+It should not replace your main ranking logic.
+It should only produce:
+* opportunity_active
+* opportunity_score
+* opportunity_type_primary
+* opportunity_type_secondary
+* need_state_windows_active
+* active_opportunity_windows
+And these values should later be used inside final ranking.
+________________
+
+
+1) FINAL ARCHITECTURE
+We will build this in 3 layers:
+________________
+
+
+LAYER A — STATIC ENTITY PROFILE
+This stores each entity’s general “opportunity behavior”.
+Table:
+* entity_opportunity_profile
+Examples:
+* Is this good at sunset?
+* Is this a quick stop?
+* Is this useful for lunch?
+* Is this good when hot / rainy?
+* Is this a good cooling break?
+* Is this better early before crowds?
+This is semi-static and can be precomputed.
+________________
+
+
+LAYER B — LIVE SESSION / MOMENT STATE
+This stores what is happening right now.
+Tables:
+* context_live_conditions
+* session_need_state
+Examples:
+* Is it sunset right now?
+* Is it hot?
+* Is the user likely hungry?
+* Is this a short commitment moment?
+* Is it a drinks window?
+* Is it a cooling break moment?
+This is recomputed frequently.
+________________
+
+
+LAYER C — COMPUTED OPPORTUNITY OUTPUT
+This stores the final opportunity result for candidate entities.
+Table:
+* entity_opportunity_state
+This is the output of the engine.
+________________
+
+
+2) FINAL TABLES (PRODUCTION VERSION)
+This is the final clean schema I recommend for your system.
+________________
+
+
+TABLE 1 — entity_opportunity_profile
+This is the most important table.
+CREATE TABLE entity_opportunity_profile (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+
+  entity_type ENUM('sight','restaurant','experience') NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+
+
+  -- Time / daypart fit
+  sunrise_relevance_score DECIMAL(6,3) DEFAULT 0,
+  sunset_relevance_score DECIMAL(6,3) DEFAULT 0,
+  morning_relevance_score DECIMAL(6,3) DEFAULT 0,
+  afternoon_relevance_score DECIMAL(6,3) DEFAULT 0,
+  evening_relevance_score DECIMAL(6,3) DEFAULT 0,
+  night_relevance_score DECIMAL(6,3) DEFAULT 0,
+
+
+  -- Weather / environment fit
+  indoor_suitability_score DECIMAL(6,3) DEFAULT 0,
+  outdoor_dependency_score DECIMAL(6,3) DEFAULT 0,
+  clear_weather_bonus_score DECIMAL(6,3) DEFAULT 0,
+  rainy_weather_penalty_score DECIMAL(6,3) DEFAULT 0,
+
+
+  -- Practicality fit
+  crowd_avoidance_value DECIMAL(6,3) DEFAULT 0,
+  early_day_advantage_score DECIMAL(6,3) DEFAULT 0,
+  half_day_fit_score DECIMAL(6,3) DEFAULT 0,
+  quick_stop_fit_score DECIMAL(6,3) DEFAULT 0,
+  short_commitment_fit_score DECIMAL(6,3) DEFAULT 0,
+
+
+  -- Need-state fit (food / comfort / social)
+  breakfast_fit_score DECIMAL(6,3) DEFAULT 0,
+  lunch_fit_score DECIMAL(6,3) DEFAULT 0,
+  coffee_fit_score DECIMAL(6,3) DEFAULT 0,
+  dinner_fit_score DECIMAL(6,3) DEFAULT 0,
+  late_night_fit_score DECIMAL(6,3) DEFAULT 0,
+
+
+  hydration_fit_score DECIMAL(6,3) DEFAULT 0,
+  cooling_break_fit_score DECIMAL(6,3) DEFAULT 0,
+  shade_break_fit_score DECIMAL(6,3) DEFAULT 0,
+  sit_down_rest_score DECIMAL(6,3) DEFAULT 0,
+
+
+  drinks_fit_score DECIMAL(6,3) DEFAULT 0,
+  stroll_fit_score DECIMAL(6,3) DEFAULT 0,
+  nightlife_warmup_fit_score DECIMAL(6,3) DEFAULT 0,
+
+
+  -- Visit shape
+  typical_visit_duration_mins INT DEFAULT NULL,
+
+
+  -- Optional metadata
+  profile_confidence DECIMAL(6,3) DEFAULT 0.50,
+  source_url TEXT DEFAULT NULL,
+
+
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_entity (entity_type, entity_id),
+  KEY idx_entity_type (entity_type),
+  KEY idx_entity_id (entity_id)
+);
+
+
+________________
+
+
+TABLE 2 — entity_operational_windows
+Use this only when you actually have operational windows.
+This is optional but powerful.
+CREATE TABLE entity_operational_windows (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+
+  entity_type ENUM('sight','restaurant','experience') NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+
+
+  window_type VARCHAR(100) NOT NULL,
+  window_start DATETIME DEFAULT NULL,
+  window_end DATETIME DEFAULT NULL,
+
+
+  urgency_curve ENUM('linear','fast_rise','hard_cutoff') DEFAULT 'linear',
+  importance_multiplier DECIMAL(6,3) DEFAULT 1.000,
+
+
+  active_flag TINYINT(1) DEFAULT 1,
+  source_url TEXT DEFAULT NULL,
+  notes TEXT DEFAULT NULL,
+
+
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  PRIMARY KEY (id),
+  KEY idx_entity (entity_type, entity_id),
+  KEY idx_window (window_type, window_start, window_end)
+);
+
+
+Example rows:
+* tour_departure
+* last_entry
+* event_start
+* ferry_cutoff
+* illumination_window
+* special_market_window
+If you don’t have this data yet, that’s okay.
+This engine still works without it.
+________________
+
+
+TABLE 3 — context_live_conditions
+This stores current local moment conditions for a location.
+CREATE TABLE context_live_conditions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+
+  context_location_id BIGINT NOT NULL,
+  local_datetime DATETIME NOT NULL,
+
+
+  weather_condition VARCHAR(100) DEFAULT NULL,
+  temperature_c DECIMAL(6,2) DEFAULT NULL,
+  rain_probability DECIMAL(6,3) DEFAULT NULL,
+  cloud_cover DECIMAL(6,3) DEFAULT NULL,
+  wind_speed_kph DECIMAL(6,2) DEFAULT NULL,
+  visibility_km DECIMAL(6,2) DEFAULT NULL,
+  uv_index DECIMAL(6,2) DEFAULT NULL,
+
+
+  sunrise_time DATETIME DEFAULT NULL,
+  sunset_time DATETIME DEFAULT NULL,
+
+
+  is_weekend TINYINT(1) DEFAULT 0,
+  is_holiday TINYINT(1) DEFAULT 0,
+
+
+  daypart VARCHAR(50) DEFAULT NULL,
+
+
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+
+  PRIMARY KEY (id),
+  KEY idx_location_time (context_location_id, local_datetime)
+);
+
+
+This can be:
+* API-fed
+* cached
+* updated every 30–60 mins
+________________
+
+
+TABLE 4 — session_need_state
+This stores current likely user needs.
+CREATE TABLE session_need_state (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+
+  session_id VARCHAR(100) NOT NULL,
+  context_location_id BIGINT DEFAULT NULL,
+  local_datetime DATETIME NOT NULL,
+
+
+  hunger_level DECIMAL(6,3) DEFAULT 0,
+  coffee_need_level DECIMAL(6,3) DEFAULT 0,
+  hydration_need_level DECIMAL(6,3) DEFAULT 0,
+  fatigue_level DECIMAL(6,3) DEFAULT 0,
+  cooling_need_level DECIMAL(6,3) DEFAULT 0,
+  sit_down_need_level DECIMAL(6,3) DEFAULT 0,
+
+
+  social_energy_level DECIMAL(6,3) DEFAULT 0,
+  stroll_readiness_level DECIMAL(6,3) DEFAULT 0,
+  nightlife_readiness_level DECIMAL(6,3) DEFAULT 0,
+
+
+  short_commitment_preference DECIMAL(6,3) DEFAULT 0,
+  half_day_block_readiness DECIMAL(6,3) DEFAULT 0,
+
+
+  active_need_windows JSON DEFAULT NULL,
+
+
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+
+  PRIMARY KEY (id),
+  KEY idx_session (session_id),
+  KEY idx_location (context_location_id)
+);
+
+
+This is session-level, not permanent user profile.
+________________
+
+
+TABLE 5 — entity_opportunity_state
+This is the final computed output table.
+CREATE TABLE entity_opportunity_state (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+
+  session_id VARCHAR(100) NOT NULL,
+  context_location_id BIGINT DEFAULT NULL,
+
+
+  entity_type ENUM('sight','restaurant','experience') NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+
+
+  opportunity_active TINYINT(1) DEFAULT 0,
+  opportunity_score DECIMAL(8,4) DEFAULT 0,
+
+
+  opportunity_type_primary VARCHAR(100) DEFAULT NULL,
+  opportunity_type_secondary JSON DEFAULT NULL,
+
+
+  need_state_windows_active JSON DEFAULT NULL,
+  active_opportunity_windows JSON DEFAULT NULL,
+
+
+  temporal_opportunity_score DECIMAL(8,4) DEFAULT 0,
+  condition_opportunity_score DECIMAL(8,4) DEFAULT 0,
+  operational_opportunity_score DECIMAL(8,4) DEFAULT 0,
+  practicality_opportunity_score DECIMAL(8,4) DEFAULT 0,
+  need_state_opportunity_score DECIMAL(8,4) DEFAULT 0,
+
+
+  opportunity_confidence DECIMAL(8,4) DEFAULT 0,
+  opportunity_explanation TEXT DEFAULT NULL,
+
+
+  computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_session_entity (session_id, entity_type, entity_id),
+  KEY idx_entity (entity_type, entity_id),
+  KEY idx_session (session_id),
+  KEY idx_location (context_location_id)
+);
+
+
+________________
+
+
+3) REQUIRED INPUTS FROM YOUR EXISTING SYSTEM
+You already have most of the raw ingredients.
+We’ll use what you likely already have.
+________________
+
+
+From Sight
+Use:
+* category / subcategory
+* tags / theme fields
+* location_id
+* timing / opening hours (if available)
+* indoor/outdoor signal (if available)
+* review count / popularity
+* rating
+* approximate duration (if available)
+________________
+
+
+From Restaurant
+Use:
+* cuisine
+* tags / category
+* opening hours
+* meal style keywords
+* cafe / bar / bakery / dinner cues
+* rating / popularity
+* location_id
+________________
+
+
+From Experience
+Use:
+* category
+* tags
+* duration
+* start time / tour time (if available)
+* indoor/outdoor
+* time-sensitive experience type
+* rating / popularity
+* location_id
+________________
+
+
+4) FIELD-BY-FIELD POPULATION SPEC
+Now the real part.
+This is how you actually populate each field.
+We’ll keep it realistic and auto-populatable.
+________________
+
+
+A) POPULATING entity_opportunity_profile
+This is a batch-precompute job.
+Run it:
+* once initially
+* then on updates / nightly / when new data comes in
+________________
+
+
+A1) TIME / DAYPART FIELDS
+________________
+
+
+sunrise_relevance_score
+Meaning
+How unusually suitable the entity is around sunrise.
+Strong for:
+* viewpoints
+* waterfronts
+* promenades
+* parks
+* scenic lookouts
+* bridges
+* river walks
+Suggested formula
+sunrise_relevance_score =
+  scenic_bonus
++ view_bonus
++ open_air_bonus
++ waterfront_bonus
+
+
+Practical SQL — Sight
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.sunrise_relevance_score =
+  LEAST(1.000,
+    (CASE WHEN s.category IN ('Viewpoint','Park','Waterfront','Scenic Walk','Bridge') THEN 0.60 ELSE 0 END) +
+    (CASE WHEN s.tags LIKE '%sunrise%' THEN 0.25 ELSE 0 END) +
+    (CASE WHEN s.tags LIKE '%view%' OR s.tags LIKE '%panoramic%' THEN 0.20 ELSE 0 END)
+  );
+
+
+________________
+
+
+sunset_relevance_score
+Usually more important than sunrise.
+Strong for:
+* skyline views
+* terraces
+* bridges
+* riverside walks
+* scenic plazas
+* viewpoints
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.sunset_relevance_score =
+  LEAST(1.000,
+    (CASE WHEN s.category IN ('Viewpoint','Waterfront','Scenic Walk','Bridge','Plaza') THEN 0.65 ELSE 0 END) +
+    (CASE WHEN s.tags LIKE '%sunset%' THEN 0.25 ELSE 0 END) +
+    (CASE WHEN s.tags LIKE '%view%' OR s.tags LIKE '%skyline%' THEN 0.20 ELSE 0 END)
+  );
+
+
+________________
+
+
+morning_relevance_score
+Strong for:
+* breakfast places
+* markets
+* parks
+* landmarks best before crowds
+* morning walks
+________________
+
+
+afternoon_relevance_score
+Strong for:
+* museums
+* lunch-friendly areas
+* shaded / indoor places
+* coffee places
+________________
+
+
+evening_relevance_score
+Strong for:
+* sunset spots
+* dinner restaurants
+* lit landmarks
+* scenic neighborhoods
+* river walks
+________________
+
+
+night_relevance_score
+Strong for:
+* nightlife
+* bars
+* night markets
+* illuminated landmarks
+* live entertainment
+________________
+
+
+Good starter rule
+For v1, populate these using category + tags + opening behavior, not NLP overkill.
+________________
+
+
+A2) WEATHER / INDOOR-OUTDOOR FIELDS
+________________
+
+
+indoor_suitability_score
+Meaning
+How suitable this is when:
+* raining
+* too hot
+* too cold
+* weather turns bad
+High for:
+* museums
+* galleries
+* indoor attractions
+* cafés
+* tea houses
+* covered markets
+SQL example
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.indoor_suitability_score =
+  CASE
+    WHEN s.is_indoor = 1 THEN 0.90
+    WHEN s.category IN ('Museum','Gallery','Church','Indoor Attraction') THEN 0.85
+    ELSE 0.20
+  END;
+
+
+For restaurants:
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.indoor_suitability_score = 0.85;
+
+
+Because restaurants are naturally strong indoor fallback opportunities.
+________________
+
+
+outdoor_dependency_score
+Meaning
+How much the entity benefits from good outdoor conditions.
+High for:
+* viewpoints
+* parks
+* walks
+* waterfronts
+* plazas
+* open-air attractions
+SQL example
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.outdoor_dependency_score =
+  CASE
+    WHEN s.is_indoor = 0 THEN 0.75
+    WHEN s.category IN ('Park','Viewpoint','Waterfront','Scenic Walk','Bridge') THEN 0.90
+    ELSE 0.20
+  END;
+
+
+________________
+
+
+clear_weather_bonus_score
+Meaning
+Extra lift in pleasant clear weather.
+High for:
+* scenic outdoor places
+* views
+* gardens
+* rooftop terraces
+* river walks
+________________
+
+
+rainy_weather_penalty_score
+Meaning
+How much the item becomes worse in rain.
+High for:
+* exposed outdoor viewpoints
+* open plazas
+* long walks
+* outdoor-only experiences
+________________
+
+
+A3) PRACTICALITY FIELDS
+These are extremely important for real feed quality.
+________________
+
+
+crowd_avoidance_value
+Meaning
+How much better this item is if done before crowds.
+High for:
+* famous landmarks
+* compact iconic sights
+* queue-prone museums
+* small photogenic spaces
+Formula
+crowd_avoidance_value =
+  popularity_component
++ compactness_component
++ queue_risk_component
+
+
+If you don’t have queue data, use popularity + compactness.
+Simple SQL approach
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.crowd_avoidance_value =
+  CASE
+    WHEN s.TATotalReviews >= 5000 THEN 0.90
+    WHEN s.TATotalReviews >= 2000 THEN 0.75
+    WHEN s.TATotalReviews >= 500 THEN 0.55
+    ELSE 0.25
+  END;
+
+
+This is a solid first approximation.
+________________
+
+
+early_day_advantage_score
+Meaning
+How much it is genuinely better early in the day.
+High for:
+* markets
+* photogenic landmarks
+* famous attractions
+* exposed outdoor walks
+SQL idea
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.early_day_advantage_score =
+  LEAST(1.000,
+    (CASE WHEN s.category IN ('Landmark','Viewpoint','Market','Park') THEN 0.45 ELSE 0 END) +
+    (CASE WHEN eop.crowd_avoidance_value >= 0.70 THEN 0.35 ELSE 0 END)
+  );
+
+
+________________
+
+
+half_day_fit_score
+Meaning
+How naturally this fits into a meaningful 2–4 hour slot.
+High for:
+* major museums
+* large parks
+* zoo
+* palaces
+* cruise experiences
+* large complexes
+Formula by duration
+UPDATE entity_opportunity_profile
+SET half_day_fit_score =
+  CASE
+    WHEN typical_visit_duration_mins >= 180 THEN 0.95
+    WHEN typical_visit_duration_mins >= 120 THEN 0.75
+    WHEN typical_visit_duration_mins >= 90 THEN 0.55
+    ELSE 0.15
+  END;
+
+
+________________
+
+
+quick_stop_fit_score
+Meaning
+How suitable this is for a short 15–45 min moment.
+High for:
+* viewpoints
+* plazas
+* facades
+* short scenic stops
+* coffee stops
+* iconic “see it and move on” places
+SQL
+UPDATE entity_opportunity_profile
+SET quick_stop_fit_score =
+  CASE
+    WHEN typical_visit_duration_mins <= 20 THEN 0.95
+    WHEN typical_visit_duration_mins <= 40 THEN 0.80
+    WHEN typical_visit_duration_mins <= 60 THEN 0.60
+    ELSE 0.20
+  END;
+
+
+________________
+
+
+short_commitment_fit_score
+Meaning
+How easy / low-friction / low-energy this feels.
+This is not only duration.
+It includes:
+* easy entry
+* no booking friction
+* mentally light
+* easy stop-in behavior
+High for:
+* cafés
+* scenic streets
+* plazas
+* promenades
+* food markets
+* quick museums
+Good heuristic
+short_commitment_fit_score =
+  0.5 * quick_stop_fit_score
++ 0.3 * low_friction_category_bonus
++ 0.2 * no_reservation_bonus
+
+
+If you don’t have reservation data, ignore that part.
+________________
+
+
+A4) NEED-STATE FIT FIELDS
+This is what makes the engine behaviorally useful.
+________________
+
+
+FOOD FIT FIELDS
+________________
+
+
+breakfast_fit_score
+High for:
+* breakfast cafés
+* bakeries
+* brunch places
+* coffee shops with food
+Restaurant SQL
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.breakfast_fit_score =
+  CASE
+    WHEN r.tags LIKE '%breakfast%' OR r.tags LIKE '%brunch%' OR r.tags LIKE '%bakery%' THEN 0.90
+    WHEN r.tags LIKE '%cafe%' OR r.tags LIKE '%coffee%' THEN 0.65
+    ELSE 0.20
+  END;
+
+
+________________
+
+
+lunch_fit_score
+High for:
+* casual restaurants
+* food halls
+* local lunch places
+* market food
+* fast but quality dining
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.lunch_fit_score =
+  CASE
+    WHEN r.tags LIKE '%lunch%' OR r.tags LIKE '%casual%' OR r.tags LIKE '%market%' THEN 0.85
+    WHEN r.tags LIKE '%restaurant%' THEN 0.60
+    ELSE 0.30
+  END;
+
+
+________________
+
+
+coffee_fit_score
+High for:
+* cafés
+* bakeries
+* tea houses
+* dessert spots
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.coffee_fit_score =
+  CASE
+    WHEN r.tags LIKE '%coffee%' OR r.tags LIKE '%cafe%' OR r.tags LIKE '%tea%' OR r.tags LIKE '%bakery%' THEN 0.92
+    ELSE 0.15
+  END;
+
+
+________________
+
+
+dinner_fit_score
+High for:
+* dinner restaurants
+* scenic dining
+* food streets
+* evening-oriented places
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.dinner_fit_score =
+  CASE
+    WHEN r.tags LIKE '%fine dining%' OR r.tags LIKE '%dinner%' OR r.tags LIKE '%evening%' THEN 0.90
+    WHEN r.tags LIKE '%restaurant%' THEN 0.70
+    ELSE 0.25
+  END;
+
+
+________________
+
+
+late_night_fit_score
+High for:
+* bars with food
+* dessert spots
+* late cafés
+* street food
+* 24h food
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.late_night_fit_score =
+  CASE
+    WHEN r.tags LIKE '%late night%' OR r.tags LIKE '%bar%' OR r.tags LIKE '%dessert%' OR r.tags LIKE '%street food%' THEN 0.85
+    ELSE 0.10
+  END;
+
+
+________________
+
+
+COMFORT FIT FIELDS
+________________
+
+
+hydration_fit_score
+High for:
+* juice bars
+* cafés
+* tea houses
+* sit-down drink places
+* shaded drink stops
+Starter heuristic:
+* most cafés = decent
+* restaurants = moderate
+* indoor museums = low
+* scenic outdoor places = low unless there are sit-down signals
+________________
+
+
+cooling_break_fit_score
+High for:
+* indoor museums
+* galleries
+* AC cafés
+* indoor markets
+* shaded indoor spaces
+Formula
+cooling_break_fit_score =
+  0.5 * indoor_suitability_score
++ 0.3 * sit_down_rest_score
++ 0.2 * hydration_fit_score
+
+
+You can directly compute and write this.
+________________
+
+
+shade_break_fit_score
+High for:
+* arcades
+* leafy parks
+* cloisters
+* covered streets
+* courtyards
+Use category + tags if available.
+________________
+
+
+sit_down_rest_score
+High for:
+* cafés
+* quiet restaurants
+* tea houses
+* lounges
+* calm courtyards
+* seated museums / cultural venues
+________________
+
+
+SOCIAL FIT FIELDS
+________________
+
+
+drinks_fit_score
+High for:
+* cocktail bars
+* pubs
+* rooftop bars
+* wine bars
+* social terraces
+Restaurant SQL
+UPDATE entity_opportunity_profile eop
+JOIN Restaurant r
+  ON eop.entity_type = 'restaurant' AND eop.entity_id = r.id
+SET eop.drinks_fit_score =
+  CASE
+    WHEN r.tags LIKE '%bar%' OR r.tags LIKE '%cocktail%' OR r.tags LIKE '%pub%' OR r.tags LIKE '%wine%' THEN 0.90
+    ELSE 0.10
+  END;
+
+
+________________
+
+
+stroll_fit_score
+High for:
+* promenades
+* riversides
+* scenic districts
+* plazas
+* atmospheric streets
+Sight SQL
+UPDATE entity_opportunity_profile eop
+JOIN Sight s
+  ON eop.entity_type = 'sight' AND eop.entity_id = s.id
+SET eop.stroll_fit_score =
+  CASE
+    WHEN s.category IN ('Scenic Walk','Waterfront','Plaza','Neighborhood','Bridge','Park') THEN 0.88
+    ELSE 0.20
+  END;
+
+
+________________
+
+
+nightlife_warmup_fit_score
+High for:
+* pre-dinner bar areas
+* atmospheric streets
+* rooftop lounges
+* social evening spaces
+Use category + tags.
+________________
+
+
+A5) typical_visit_duration_mins
+This field is extremely important because it powers:
+* half_day_fit_score
+* quick_stop_fit_score
+* short_commitment_fit_score
+If you don’t already have duration, create a heuristic default.
+________________
+
+
+Suggested default duration mapping
+Sight
+Category
+	Minutes
+	Viewpoint
+	25
+	Landmark
+	35
+	Museum
+	120
+	Gallery
+	75
+	Park
+	90
+	Bridge
+	20
+	Scenic Walk
+	60
+	Church
+	45
+	Market
+	75
+	Restaurant
+Type
+	Minutes
+	Cafe
+	35
+	Bakery
+	25
+	Casual Dining
+	55
+	Fine Dining
+	95
+	Bar
+	70
+	Experience
+Type
+	Minutes
+	Short Tour
+	90
+	Walking Tour
+	150
+	Cruise
+	120
+	Workshop
+	120
+	Show
+	110
+	You should absolutely populate this.
+________________
+
+
+5) POPULATING LIVE CONTEXT — context_live_conditions
+This should be updated periodically per city / location.
+________________
+
+
+REQUIRED LIVE DERIVED FIELDS
+When you load current conditions, derive these booleans in PHP:
+* is_sunrise_window
+* is_sunset_window
+* is_breakfast_window
+* is_lunch_window
+* is_coffee_window
+* is_dinner_window
+* is_late_night_window
+* is_nightlife_window
+And also:
+* weather_good_for_outdoors
+* weather_bad_for_outdoors
+* heat_stress_window
+* pleasant_stroll_window
+________________
+
+
+PHP helper — detect windows
+function detectActiveOpportunityWindows($live) {
+    $now = \Carbon\Carbon::parse($live->local_datetime);
+    $sunrise = \Carbon\Carbon::parse($live->sunrise_time);
+    $sunset = \Carbon\Carbon::parse($live->sunset_time);
+
+
+    return [
+        'sunrise_window' => $now->between($sunrise->copy()->subMinutes(45), $sunrise->copy()->addMinutes(60)),
+        'sunset_window' => $now->between($sunset->copy()->subMinutes(75), $sunset->copy()->addMinutes(45)),
+
+
+        'breakfast_window' => $now->format('H:i:s') >= '07:30:00' && $now->format('H:i:s') <= '10:30:00',
+        'lunch_window' => $now->format('H:i:s') >= '11:30:00' && $now->format('H:i:s') <= '14:30:00',
+        'coffee_window' => (
+            ($now->format('H:i:s') >= '09:00:00' && $now->format('H:i:s') <= '11:30:00') ||
+            ($now->format('H:i:s') >= '15:00:00' && $now->format('H:i:s') <= '17:30:00')
+        ),
+        'dinner_window' => $now->format('H:i:s') >= '18:30:00' && $now->format('H:i:s') <= '21:30:00',
+        'late_night_food_window' => (
+            $now->format('H:i:s') >= '22:00:00' || $now->format('H:i:s') <= '02:00:00'
+        ),
+        'nightlife_window' => (
+            $now->format('H:i:s') >= '20:30:00' || $now->format('H:i:s') <= '01:30:00'
+        ),
+
+
+        'weather_good_for_outdoors' =>
+            $live->rain_probability < 0.25 &&
+            $live->temperature_c >= 14 &&
+            $live->temperature_c <= 28 &&
+            $live->wind_speed_kph < 25,
+
+
+        'weather_bad_for_outdoors' =>
+            $live->rain_probability > 0.55 ||
+            $live->temperature_c > 34 ||
+            $live->temperature_c < 5 ||
+            $live->wind_speed_kph > 35,
+
+
+        'heat_stress_window' =>
+            $live->temperature_c >= 31 ||
+            ($live->temperature_c >= 28 && $live->uv_index >= 7),
+
+
+        'pleasant_stroll_window' =>
+            $live->temperature_c >= 16 &&
+            $live->temperature_c <= 26 &&
+            $live->rain_probability < 0.20 &&
+            $live->wind_speed_kph < 18 &&
+            ($now->format('H:i:s') >= '17:00:00' && $now->format('H:i:s') <= '22:00:00'),
+    ];
+}
+
+
+This is a very solid v1.
+________________
+
+
+6) POPULATING session_need_state
+This is where your system starts feeling smart.
+This should be recomputed:
+* when session opens
+* when feed refreshes
+* after meaningful session movement
+* every 30–60 mins
+________________
+
+
+REQUIRED NEED SCORES
+We’ll compute:
+* hunger_level
+* coffee_need_level
+* hydration_need_level
+* fatigue_level
+* cooling_need_level
+* sit_down_need_level
+* social_energy_level
+* stroll_readiness_level
+* short_commitment_preference
+* half_day_block_readiness
+________________
+
+
+PHP helper — compute need state
+function clamp01($value) {
+    return max(0, min(1, $value));
+}
+
+
+________________
+
+
+A) Hunger
+function computeHungerLevel($now, $hoursSinceStart = 0, $walkingMinutes = 0, $recentMeal = false) {
+    $time = $now->format('H:i:s');
+
+
+    $base = 0.20;
+    if ($time >= '08:00:00' && $time <= '10:00:00') $base = 0.85;
+    elseif ($time >= '12:00:00' && $time <= '14:30:00') $base = 0.90;
+    elseif ($time >= '19:00:00' && $time <= '21:30:00') $base = 0.90;
+
+
+    $tripFactor = min($hoursSinceStart / 8, 0.25);
+    $walkingFactor = min($walkingMinutes / 300, 0.20);
+    $recentMealDecay = $recentMeal ? 0.50 : 0.0;
+
+
+    return clamp01($base + $tripFactor + $walkingFactor - $recentMealDecay);
+}
+
+
+________________
+
+
+B) Coffee
+function computeCoffeeNeedLevel($now, $fatigueLevel = 0, $recentCoffee = false) {
+    $time = $now->format('H:i:s');
+
+
+    $base = 0.10;
+    if (($time >= '09:00:00' && $time <= '11:30:00') || ($time >= '15:00:00' && $time <= '17:30:00')) {
+        $base = 0.75;
+    }
+
+
+    $fatigueBoost = 0.25 * $fatigueLevel;
+    $recentDecay = $recentCoffee ? 0.45 : 0.0;
+
+
+    return clamp01($base + $fatigueBoost - $recentDecay);
+}
+
+
+________________
+
+
+C) Hydration / Cooling
+function computeHydrationNeedLevel($temperatureC, $walkingMinutes = 0, $hoursSinceRest = 0) {
+    $heatFactor = max(0, ($temperatureC - 20) / 18);
+    $walkFactor = min($walkingMinutes / 240, 0.25);
+    $restFactor = min($hoursSinceRest / 4, 0.20);
+
+
+    return clamp01($heatFactor + $walkFactor + $restFactor);
+}
+
+
+function computeCoolingNeedLevel($temperatureC, $uvIndex = 0) {
+    $tempFactor = max(0, ($temperatureC - 26) / 12);
+    $uvFactor = $uvIndex >= 7 ? 0.25 : 0.0;
+
+
+    return clamp01($tempFactor + $uvFactor);
+}
+
+
+________________
+
+
+D) Fatigue / Sit-down
+function computeFatigueLevel($hoursSinceStart = 0, $walkingMinutes = 0, $activitiesDone = 0) {
+    $tripFactor = min($hoursSinceStart / 10, 0.35);
+    $walkFactor = min($walkingMinutes / 360, 0.35);
+    $activityFactor = min($activitiesDone / 6, 0.20);
+
+
+    return clamp01($tripFactor + $walkFactor + $activityFactor);
+}
+
+
+function computeSitDownNeedLevel($fatigueLevel, $coolingNeedLevel = 0) {
+    return clamp01($fatigueLevel + (0.35 * $coolingNeedLevel));
+}
+
+
+________________
+
+
+E) Social / Stroll
+function computeSocialEnergyLevel($now, $fatigueLevel = 0) {
+    $time = $now->format('H:i:s');
+
+
+    $base = 0.15;
+    if ($time >= '17:30:00' && $time <= '22:00:00') $base = 0.65;
+
+
+    return clamp01($base - (0.25 * $fatigueLevel));
+}
+
+
+function computeStrollReadinessLevel($pleasantStrollWindow, $now, $timePressure = 0) {
+    $time = $now->format('H:i:s');
+
+
+    $postDinnerBonus = ($time >= '19:00:00' && $time <= '22:30:00') ? 0.25 : 0.0;
+    $pleasantBonus = $pleasantStrollWindow ? 0.50 : 0.0;
+    $pressurePenalty = 0.35 * $timePressure;
+
+
+    return clamp01($pleasantBonus + $postDinnerBonus - $pressurePenalty);
+}
+
+
+________________
+
+
+F) Commitment / Half-day readiness
+function computeShortCommitmentPreference($fatigueLevel, $timePressure = 0) {
+    return clamp01((0.55 * $fatigueLevel) + (0.45 * $timePressure));
+}
+
+
+function computeHalfDayBlockReadiness($remainingFreeMinutes = 0, $fatigueLevel = 0) {
+    if ($remainingFreeMinutes < 180) return 0.0;
+
+
+    $timeFit = min($remainingFreeMinutes / 300, 1.0);
+    return clamp01((0.75 * $timeFit) - (0.25 * $fatigueLevel));
+}
+
+
+________________
+
+
+ACTIVE NEED WINDOWS
+After computing the need scores, convert them into active windows.
+function buildActiveNeedWindows($state, $activeWindows) {
+    $windows = [];
+
+
+    if (!empty($activeWindows['breakfast_window']) && $state['hunger_level'] >= 0.55) $windows[] = 'breakfast_window';
+    if (!empty($activeWindows['lunch_window']) && $state['hunger_level'] >= 0.55) $windows[] = 'lunch_window';
+    if (!empty($activeWindows['coffee_window']) && $state['coffee_need_level'] >= 0.50) $windows[] = 'coffee_window';
+    if (!empty($activeWindows['dinner_window']) && $state['hunger_level'] >= 0.55) $windows[] = 'dinner_window';
+    if (!empty($activeWindows['late_night_food_window']) && $state['hunger_level'] >= 0.50) $windows[] = 'late_night_food_window';
+
+
+    if ($state['hydration_need_level'] >= 0.55) $windows[] = 'hydration_window';
+    if ($state['cooling_need_level'] >= 0.55) $windows[] = 'cooling_break_window';
+    if ($state['sit_down_need_level'] >= 0.55) $windows[] = 'sit_down_rest_window';
+
+
+    if ($state['social_energy_level'] >= 0.55 && !empty($activeWindows['nightlife_window'])) $windows[] = 'drinks_window';
+    if ($state['stroll_readiness_level'] >= 0.55) $windows[] = 'after_dinner_stroll_window';
+
+
+    if ($state['short_commitment_preference'] >= 0.55) $windows[] = 'short_commitment_window';
+    if ($state['half_day_block_readiness'] >= 0.55) $windows[] = 'half_day_block_window';
+
+
+    return array_values(array_unique($windows));
+}
+
+
+This is exactly the kind of output you want.
+________________
+
+
+7) OPPORTUNITY ENGINE — SCORING LOGIC
+Now the actual engine.
+This is the core scoring module.
+________________
+
+
+FINAL SCORE COMPONENTS
+For each candidate entity, compute:
+* temporal_opportunity_score
+* condition_opportunity_score
+* operational_opportunity_score
+* practicality_opportunity_score
+* need_state_opportunity_score
+Then combine them.
+________________
+
+
+A) TEMPORAL SCORE
+function computeTemporalOpportunity($profile, $activeWindows) {
+    $scores = [];
+
+
+    if (!empty($activeWindows['sunrise_window'])) $scores[] = $profile->sunrise_relevance_score;
+    if (!empty($activeWindows['sunset_window'])) $scores[] = $profile->sunset_relevance_score;
+
+
+    if (!empty($activeWindows['breakfast_window'])) $scores[] = $profile->morning_relevance_score;
+    if (!empty($activeWindows['lunch_window'])) $scores[] = $profile->afternoon_relevance_score;
+    if (!empty($activeWindows['dinner_window'])) $scores[] = $profile->evening_relevance_score;
+    if (!empty($activeWindows['nightlife_window'])) $scores[] = $profile->night_relevance_score;
+
+
+    return !empty($scores) ? max($scores) : 0;
+}
+
+
+This keeps temporal scoring clean and not bloated.
+________________
+
+
+B) CONDITION SCORE
+function computeConditionOpportunity($profile, $activeWindows) {
+    $scores = [];
+
+
+    if (!empty($activeWindows['weather_good_for_outdoors'])) {
+        $scores[] = (0.6 * $profile->outdoor_dependency_score) + (0.4 * $profile->clear_weather_bonus_score);
+    }
+
+
+    if (!empty($activeWindows['weather_bad_for_outdoors'])) {
+        $scores[] = $profile->indoor_suitability_score;
+    }
+
+
+    if (!empty($activeWindows['heat_stress_window'])) {
+        $scores[] = (0.5 * $profile->cooling_break_fit_score) + (0.3 * $profile->indoor_suitability_score) + (0.2 * $profile->sit_down_rest_score);
+    }
+
+
+    if (!empty($activeWindows['pleasant_stroll_window'])) {
+        $scores[] = $profile->stroll_fit_score;
+    }
+
+
+    return !empty($scores) ? max($scores) : 0;
+}
+
+
+________________
+
+
+C) OPERATIONAL SCORE
+This one is important.
+If you have operational windows, this can create strong “why now” boosts.
+________________
+
+
+Urgency helper
+function computeOperationalUrgency($windowStart, $windowEnd, $now, $curve = 'linear') {
+    $nowTs = strtotime($now);
+    $startTs = strtotime($windowStart);
+    $endTs = strtotime($windowEnd);
+
+
+    if ($nowTs > $endTs) return 0;
+
+
+    if ($nowTs < $startTs) {
+        $minutesToStart = max(0, ($startTs - $nowTs) / 60);
+        $preWindow = 120;
+
+
+        $base = max(0, 1 - ($minutesToStart / $preWindow));
+    } else {
+        $minutesToEnd = max(0, ($endTs - $nowTs) / 60);
+        $preClose = 90;
+
+
+        $base = max(0, 1 - ($minutesToEnd / $preClose));
+    }
+
+
+    if ($curve === 'fast_rise') return clamp01(pow($base, 0.7));
+    if ($curve === 'hard_cutoff') return clamp01(pow($base, 0.5));
+
+
+    return clamp01($base);
+}
+
+
+________________
+
+
+Main operational score
+function computeOperationalOpportunity($entity, $operationalWindows, $now) {
+    $best = 0;
+
+
+    foreach ($operationalWindows as $window) {
+        $urgency = computeOperationalUrgency(
+            $window->window_start,
+            $window->window_end,
+            $now,
+            $window->urgency_curve
+        );
+
+
+        $fit = 0.8; // default operational fit
+        $score = $urgency * $fit * $window->importance_multiplier;
+
+
+        if ($score > $best) $best = $score;
+    }
+
+
+    return clamp01($best);
+}
+
+
+If no operational windows exist, return 0.
+That’s totally fine.
+________________
+
+
+D) PRACTICALITY SCORE
+This should reflect current trip shape.
+function computePracticalityOpportunity($profile, $sessionState, $activeWindows) {
+    $scores = [];
+
+
+    if (!empty($activeWindows['breakfast_window']) || !empty($activeWindows['sunrise_window'])) {
+        $scores[] = $profile->early_day_advantage_score;
+        $scores[] = $profile->crowd_avoidance_value;
+    }
+
+
+    if ($sessionState['half_day_block_readiness'] >= 0.55) {
+        $scores[] = $sessionState['half_day_block_readiness'] * $profile->half_day_fit_score;
+    }
+
+
+    if ($sessionState['short_commitment_preference'] >= 0.55) {
+        $scores[] = $sessionState['short_commitment_preference'] * $profile->short_commitment_fit_score;
+        $scores[] = $sessionState['short_commitment_preference'] * $profile->quick_stop_fit_score;
+    }
+
+
+    return !empty($scores) ? max($scores) : 0;
+}
+
+
+________________
+
+
+E) NEED-STATE SCORE
+This is the most human-feeling part.
+function computeNeedStateOpportunity($profile, $sessionState) {
+    $scores = [];
+
+
+    $mealFit = max(
+        $profile->breakfast_fit_score,
+        $profile->lunch_fit_score,
+        $profile->dinner_fit_score,
+        $profile->late_night_fit_score
+    );
+
+
+    $scores[] = $sessionState['hunger_level'] * $mealFit;
+    $scores[] = $sessionState['coffee_need_level'] * $profile->coffee_fit_score;
+    $scores[] = $sessionState['hydration_need_level'] * $profile->hydration_fit_score;
+    $scores[] = $sessionState['cooling_need_level'] * $profile->cooling_break_fit_score;
+    $scores[] = $sessionState['sit_down_need_level'] * $profile->sit_down_rest_score;
+    $scores[] = $sessionState['social_energy_level'] * $profile->drinks_fit_score;
+    $scores[] = $sessionState['stroll_readiness_level'] * $profile->stroll_fit_score;
+
+
+    return !empty($scores) ? max($scores) : 0;
+}
+
+
+This is what lets:
+* coffee surface at coffee time
+* lunch surface at lunch
+* cooling spots surface in heat
+* scenic strolls surface post-dinner
+Exactly what you want.
+________________
+
+
+8) FINAL OPPORTUNITY SCORE FORMULA
+Now combine everything.
+function computeFinalOpportunityScore($temporal, $condition, $operational, $practicality, $needState) {
+    return clamp01(
+        (0.18 * $temporal) +
+        (0.16 * $condition) +
+        (0.28 * $operational) +
+        (0.16 * $practicality) +
+        (0.22 * $needState)
+    );
+}
+
+
+________________
+
+
+THRESHOLDING
+$opportunityActive = $opportunityScore >= 0.35 ? 1 : 0;
+
+
+Recommended interpretation
+Score
+	Meaning
+	0.00–0.24
+	weak
+	0.25–0.44
+	light
+	0.45–0.69
+	meaningful
+	0.70+
+	strong
+	________________
+
+
+PRIMARY / SECONDARY TYPE ASSIGNMENT
+________________
+
+
+Primary type
+function determinePrimaryOpportunityType($temporal, $condition, $operational, $practicality, $needState) {
+    $map = [
+        'temporal' => $temporal,
+        'condition' => $condition,
+        'operational' => $operational,
+        'practicality' => $practicality,
+        'need_state' => $needState,
+    ];
+
+
+    arsort($map);
+    return array_key_first($map);
+}
+
+
+________________
+
+
+Secondary tags
+function determineSecondaryOpportunityTags($activeWindows, $needWindows) {
+    $tags = [];
+
+
+    foreach ($activeWindows as $key => $active) {
+        if ($active) $tags[] = $key;
+    }
+
+
+    foreach ($needWindows as $window) {
+        $tags[] = $window;
+    }
+
+
+    return array_values(array_unique($tags));
+}
+
+
+________________
+
+
+9) LARAVEL SERVICE ARCHITECTURE
+This is how I strongly recommend you implement it.
+________________
+
+
+CREATE THESE SERVICES
+________________
+
+
+1. OpportunityProfileBuilderService
+Purpose:
+* populate/update entity_opportunity_profile
+Run:
+* artisan command
+* nightly
+* after data imports
+________________
+
+
+2. LiveContextService
+Purpose:
+* fetch / cache weather
+* compute active moment windows
+Outputs:
+* context_live_conditions
+* $activeWindows
+________________
+
+
+3. NeedStateService
+Purpose:
+* compute session-level human needs
+Outputs:
+* session_need_state
+* $sessionState
+________________
+
+
+4. OpportunityEngineService
+Purpose:
+* compute final opportunity scores for candidate entities
+Outputs:
+* entity_opportunity_state
+This is the main engine.
+________________
+
+
+10) MAIN ENGINE FLOW (FINAL)
+This is exactly how the runtime should work.
+________________
+
+
+OpportunityEngineService::run(...)
+Inputs
+* $sessionId
+* $contextLocationId
+* $candidateEntities
+* $routeState
+* $sessionBehavior
+* $remainingFreeMinutes
+Output
+* rows written into entity_opportunity_state
+________________
+
+
+FINAL FLOW
+public function run($sessionId, $contextLocationId, $candidateEntities, $routeState = [], $sessionBehavior = [], $remainingFreeMinutes = 0)
+{
+    $live = app(LiveContextService::class)->getLiveConditions($contextLocationId);
+    $activeWindows = app(LiveContextService::class)->detectActiveOpportunityWindows($live);
+
+
+    $sessionState = app(NeedStateService::class)->compute(
+        $sessionId,
+        $contextLocationId,
+        $live,
+        $routeState,
+        $sessionBehavior,
+        $remainingFreeMinutes,
+        $activeWindows
+    );
+
+
+    foreach ($candidateEntities as $candidate) {
+        $profile = $this->getOpportunityProfile($candidate->entity_type, $candidate->entity_id);
+        if (!$profile) continue;
+
+
+        $operationalWindows = $this->getOperationalWindows($candidate->entity_type, $candidate->entity_id, $live->local_datetime);
+
+
+        $temporal = computeTemporalOpportunity($profile, $activeWindows);
+        $condition = computeConditionOpportunity($profile, $activeWindows);
+        $operational = computeOperationalOpportunity($candidate, $operationalWindows, $live->local_datetime);
+        $practicality = computePracticalityOpportunity($profile, $sessionState, $activeWindows);
+        $needState = computeNeedStateOpportunity($profile, $sessionState);
+
+
+        $opportunityScore = computeFinalOpportunityScore($temporal, $condition, $operational, $practicality, $needState);
+        $opportunityActive = $opportunityScore >= 0.35 ? 1 : 0;
+
+
+        $primaryType = determinePrimaryOpportunityType($temporal, $condition, $operational, $practicality, $needState);
+        $secondaryTags = determineSecondaryOpportunityTags($activeWindows, $sessionState['active_need_windows']);
+
+
+        DB::table('entity_opportunity_state')->updateOrInsert(
+            [
+                'session_id' => $sessionId,
+                'entity_type' => $candidate->entity_type,
+                'entity_id' => $candidate->entity_id,
+            ],
+            [
+                'context_location_id' => $contextLocationId,
+                'opportunity_active' => $opportunityActive,
+                'opportunity_score' => $opportunityScore,
+
+
+                'opportunity_type_primary' => $primaryType,
+                'opportunity_type_secondary' => json_encode($secondaryTags),
+
+
+                'need_state_windows_active' => json_encode($sessionState['active_need_windows']),
+                'active_opportunity_windows' => json_encode(array_keys(array_filter($activeWindows))),
+
+
+                'temporal_opportunity_score' => $temporal,
+                'condition_opportunity_score' => $condition,
+                'operational_opportunity_score' => $operational,
+                'practicality_opportunity_score' => $practicality,
+                'need_state_opportunity_score' => $needState,
+
+
+                'opportunity_confidence' => $profile->profile_confidence ?? 0.5,
+                'opportunity_explanation' => $this->buildOpportunityExplanation($primaryType, $secondaryTags),
+
+
+                'computed_at' => now(),
+            ]
+        );
+    }
+}
+
+
+This is the correct architecture.
+________________
+
+
+11) HOW TO USE THIS IN FINAL RANKING
+This is critical.
+Opportunity should not become the ranking itself.
+It should be a temporary lift layer.
+________________
+
+
+Recommended usage
+Later in final ranking:
+final_rank_score =
+  base_score
+  + (opportunity_score * opportunity_weight)
+
+
+Suggested first production weight
+opportunity_weight = 12 to 18
+
+
+Depends on your base score scale.
+________________
+
+
+Example
+If your final ranking score is on a 0–100 scale:
+final_rank_score =
+  base_rank_score
+  + (opportunity_score * 15)
+
+
+That means:
+* strong opportunity can move something up
+* but not completely resurrect junk
+Exactly how it should behave.
+________________
+
+
+12) WHAT THIS ENGINE SHOULD CHANGE IN FEED BEHAVIOR
+When implemented correctly, your feed will start doing things like:
+________________
+
+
+At 9:15 AM
+It surfaces:
+* breakfast café
+* iconic landmark before crowds
+* quiet morning walk
+* quick scenic stop
+________________
+
+
+At 1:00 PM
+It surfaces:
+* lunch-fit food options
+* short indoor attraction
+* shaded sit-down stop
+* compact attraction between meals
+________________
+
+
+At 5:45 PM
+It surfaces:
+* sunset viewpoint
+* riverside walk
+* bridge / skyline photo spot
+* drinks warm-up places
+________________
+
+
+At 8:30 PM
+It surfaces:
+* dinner-fit restaurants
+* drinks spots
+* atmospheric strolls
+* illuminated landmarks
+* nightlife warm-up
+________________
+
+
+On hot weather
+It surfaces:
+* indoor museums
+* AC cafés
+* shaded calm stops
+* hydration-friendly breaks
+That is exactly the “alive” behavior you want.
+________________
+
+
+13) RECOMMENDED BUILD ORDER
+Do this in this exact order.
+________________
+
+
+PHASE 1 — Build core profile table
+Build:
+* entity_opportunity_profile
+Populate:
+* time fit
+* indoor/outdoor
+* duration
+* meal fit
+* practicality fit
+This gives you 70% of the engine already.
+________________
+
+
+PHASE 2 — Build live windows
+Build:
+* context_live_conditions
+* active window detection
+This gives you:
+* sunset / meal / heat / stroll windows
+Now the engine starts becoming alive.
+________________
+
+
+PHASE 3 — Build session need state
+Build:
+* session_need_state
+This gives you:
+* hunger
+* coffee
+* fatigue
+* cooling
+* sit-down
+* social / stroll
+Now the engine becomes behaviorally smart.
+________________
+
+
+PHASE 4 — Build scoring engine
+Build:
+* entity_opportunity_state
+* OpportunityEngineService
+Now you can actually inject opportunity into ranking.
+________________
+
+
+PHASE 5 — Add operational windows later
+Build:
+* entity_operational_windows
+This is optional v2.
+Do not block v1 on this.
+________________
+
+
+14) FINAL RECOMMENDATION FOR YOUR STACK
+For your Laravel system:
+Best implementation split
+SQL should do:
+* profile table population
+* joins
+* pulling candidates
+* pulling weather / live data
+* pulling operational windows
+PHP / Laravel should do:
+* active window detection
+* need-state estimation
+* score computation
+* explanations
+* final state writing
+That is the cleanest and most maintainable setup.
+________________
+
+
+WHAT I RECOMMEND NEXT
+The next best step is not more theory.
+The next real step is:
+Build the exact auto-population SQL for entity_opportunity_profile using your actual Sight / Restaurant / Experience structure
+That would give you:
+* the real SQL migration + population logic
+* tuned to your actual columns
+* ready to run in your database
+And after that, we can do:
+the exact Laravel OpportunityEngineService.php full production code
+That would make this fully buildable end-to-end.
+If you want, I’ll do the next step as:
+“Opportunity Engine — actual SQL population script for my real tables”
+That’s the most practical next move.

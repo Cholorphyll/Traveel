@@ -1,0 +1,1726 @@
+﻿MODULE 8 — Sequence Planner Engine
+1) Purpose
+The Sequence Planner Engine converts all upstream intelligence into a slot plan.
+It does not directly rank POIs.
+Instead, it decides things like:
+* “after this landmark, show a scenic decompression”
+* “it’s lunchtime, insert a food collection”
+* “don’t show two physically demanding items in a row”
+* “the weather is worsening, prioritize covered transitions”
+* “top of feed should stay action-ready”
+* “this is a hero sunset window, temporarily override normal progression”
+So this module outputs:
+* what kind of slot should appear next
+* how many of each slot type should appear
+* in what order
+* with what urgency
+* with what context constraints
+That slot plan is then consumed by:
+* Module 9: Candidate Assembler / Slot Filler
+* Module 10: Final Feed Ranker
+________________
+
+
+2) Core idea
+The feed should not feel like:
+* random top-rated places
+* a category dump
+* “10 best things nearby”
+It should feel like:
+a coherent day unfolding
+That means feed sequencing must balance:
+* structural movement
+* emotional rhythm
+* comfort
+* actionability
+* practical need states
+* temporary windows
+* trip reassurance
+________________
+
+
+3) What this module should output
+The Sequence Planner should produce a planned feed skeleton.
+Example:
+[
+  {
+    "slot_position": 1,
+    "slot_type": "DO_NOW_ACTION_SLOT",
+    "slot_goal": "immediate_action",
+    "anchor_relation": "CURRENT_ANCHOR",
+    "reason": "user is near active anchor and this is top-of-feed"
+  },
+  {
+    "slot_position": 2,
+    "slot_type": "RECOVERY_SCENIC_SLOT",
+    "slot_goal": "decompression",
+    "anchor_relation": "WITHIN_CURRENT_ANCHOR",
+    "reason": "previous item was high walking load"
+  },
+  {
+    "slot_position": 3,
+    "slot_type": "LUNCH_SLOT",
+    "slot_goal": "need_state_resolution",
+    "anchor_relation": "CURRENT_AREA",
+    "reason": "local lunch window active"
+  },
+  {
+    "slot_position": 4,
+    "slot_type": "NEXT_ANCHOR_SLOT",
+    "slot_goal": "forward_progression",
+    "anchor_relation": "NEXT_ANCHOR",
+    "reason": "trip should move toward next major anchor"
+  }
+]
+
+
+This output should be stored, queryable, and explainable.
+________________
+
+
+4) Sequence Planner design principle
+This module should work in two layers:
+Layer A — Sequence State Understanding
+Understand:
+* where the traveler currently is in the journey
+* what was already shown
+* what was already done
+* what should happen next
+Layer B — Slot Planning
+Generate the next N slot intents (usually 10–30 feed positions)
+So architecturally:
+User context
++ Feed context
++ Journey context
++ Need state context
++ Weather / comfort context
++ Opportunity context
++ Anchor progression context
+---------------------------------
+=> Sequence State
+---------------------------------
+=> Slot Plan
+
+
+________________
+
+
+5) Main outputs of the Sequence Planner
+You should build three core tables:
+1. sequence_context_state
+2. sequence_slot_templates
+3. sequence_plan_output
+And optionally:
+4. sequence_transition_rules
+5. sequence_rhythm_penalties
+6. sequence_slot_scores
+These make the engine modular and debuggable.
+________________
+
+
+6) TABLE 1 — sequence_context_state
+This table represents the current planning state for a user/session/day block.
+It is the main input row used by the planner.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_context_state (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(120) NOT NULL,
+    user_id BIGINT NULL,
+    trip_id BIGINT NULL,
+
+
+    planning_ts DATETIME NOT NULL,
+    local_date DATE NOT NULL,
+    local_hour TINYINT NOT NULL,
+    local_minute TINYINT NOT NULL,
+    daypart VARCHAR(40) NULL,
+
+
+    current_anchor_entity_id BIGINT NULL,
+    next_anchor_entity_id BIGINT NULL,
+    current_anchor_strength DECIMAL(8,4) NULL,
+    next_anchor_strength DECIMAL(8,4) NULL,
+    anchor_progress_stage VARCHAR(50) NULL,
+
+
+    current_lat DECIMAL(10,7) NULL,
+    current_lng DECIMAL(10,7) NULL,
+    movement_state VARCHAR(40) NULL,
+    travel_mode VARCHAR(40) NULL,
+
+
+    weather_mode VARCHAR(50) NULL,
+    comfort_mode VARCHAR(50) NULL,
+    thermal_load_score DECIMAL(8,4) NULL,
+    precipitation_risk_score DECIMAL(8,4) NULL,
+    wind_comfort_score DECIMAL(8,4) NULL,
+
+
+    action_horizon_bias VARCHAR(50) NULL,
+    top_feed_urgency_score DECIMAL(8,4) NULL,
+
+
+    meal_window_state VARCHAR(50) NULL,
+    break_need_score DECIMAL(8,4) NULL,
+    fatigue_load_score DECIMAL(8,4) NULL,
+    hunger_probability_score DECIMAL(8,4) NULL,
+    hydration_need_score DECIMAL(8,4) NULL,
+
+
+    active_opportunity_class VARCHAR(80) NULL,
+    active_opportunity_strength DECIMAL(8,4) NULL,
+
+
+    recent_heavy_count INT DEFAULT 0,
+    recent_long_count INT DEFAULT 0,
+    recent_indoor_count INT DEFAULT 0,
+    recent_food_count INT DEFAULT 0,
+    recent_anchor_count INT DEFAULT 0,
+    recent_recovery_count INT DEFAULT 0,
+
+
+    current_sequence_mode VARCHAR(60) NULL,
+    feed_depth_position INT DEFAULT 0,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    INDEX idx_session_time (session_id, planning_ts),
+    INDEX idx_trip (trip_id),
+    INDEX idx_anchor (current_anchor_entity_id, next_anchor_entity_id)
+);
+
+
+________________
+
+
+7) Detailed explanation of each field + how to calculate it
+________________
+
+
+7.1 Session / planning identity fields
+session_id
+Represents one active planning/feed session.
+Populate from:
+* frontend session
+* user browsing session
+* itinerary session
+________________
+
+
+trip_id
+Optional trip or destination context.
+If user is on a city/day exploration session, this ties the planner to that trip context.
+________________
+
+
+planning_ts, local_date, local_hour, local_minute, daypart
+Used to determine:
+* lunch windows
+* sunset sequencing
+* energy rhythm
+* urgency
+Suggested daypart logic
+CASE
+    WHEN HOUR(planning_ts) BETWEEN 5 AND 9 THEN 'EARLY_MORNING'
+    WHEN HOUR(planning_ts) BETWEEN 10 AND 11 THEN 'LATE_MORNING'
+    WHEN HOUR(planning_ts) BETWEEN 12 AND 14 THEN 'LUNCH'
+    WHEN HOUR(planning_ts) BETWEEN 15 AND 17 THEN 'AFTERNOON'
+    WHEN HOUR(planning_ts) BETWEEN 18 AND 20 THEN 'EVENING'
+    WHEN HOUR(planning_ts) BETWEEN 21 AND 23 THEN 'NIGHT'
+    ELSE 'LATE_NIGHT'
+END
+
+
+________________
+
+
+8) Anchor progression fields
+This is one of the most important parts.
+Sequence planning must know:
+* what anchor the user is currently orbiting
+* what anchor should logically come next
+* whether we should deepen current anchor or progress
+________________
+
+
+8.1 current_anchor_entity_id
+The anchor currently dominating the user’s nearby or feed context.
+Usually comes from Module 6 — Role Assignment Engine.
+Populate using:
+highest role-weighted candidate where role in:
+* CURRENT_ANCHOR
+* COMPOSITE_ANCHOR
+* COLLECTIVE_DESTINATION
+Example:
+SELECT entity_id
+FROM role_assignment_output
+WHERE session_id = :session_id
+  AND assigned_role IN ('CURRENT_ANCHOR','COMPOSITE_ANCHOR','COLLECTIVE_DESTINATION')
+ORDER BY role_strength_score DESC
+LIMIT 1;
+
+
+________________
+
+
+8.2 next_anchor_entity_id
+The most likely next structural destination.
+Comes from:
+* anchor graph
+* travel direction
+* nearby must-see clustering
+* itinerary progression logic
+Populate from anchor graph transition
+SELECT to_entity_id
+FROM anchor_transition_graph
+WHERE from_entity_id = :current_anchor_entity_id
+ORDER BY transition_probability DESC, structural_pull_score DESC
+LIMIT 1;
+
+
+________________
+
+
+8.3 current_anchor_strength, next_anchor_strength
+How dominant each anchor is right now.
+Formula
+anchor_strength =
+0.35 * structural_importance_score
++ 0.25 * proximity_relevance_score
++ 0.20 * current_context_fit_score
++ 0.20 * role_strength_score
+
+
+________________
+
+
+8.4 anchor_progress_stage
+This is critical for sequencing.
+Possible values:
+* ARRIVING
+* ORBITING
+* SATURATING
+* TRANSITIONING
+* MOVING_TO_NEXT
+* ANCHOR_GAP
+* DAY_CLOSING
+How to compute it
+This is based on:
+* whether user has already seen/engaged with current anchor
+* number of current-anchor items already shown
+* dwell time in current anchor area
+* whether a next anchor is nearby and structurally stronger now
+Example logic
+CASE
+    WHEN current_anchor_entity_id IS NULL THEN 'ANCHOR_GAP'
+    WHEN recent_anchor_count = 0 THEN 'ARRIVING'
+    WHEN recent_anchor_count BETWEEN 1 AND 3 THEN 'ORBITING'
+    WHEN recent_anchor_count >= 4 AND next_anchor_strength < current_anchor_strength THEN 'SATURATING'
+    WHEN recent_anchor_count >= 4 AND next_anchor_strength >= current_anchor_strength THEN 'TRANSITIONING'
+    ELSE 'ORBITING'
+END
+
+
+This field heavily controls whether planner inserts:
+* deeper local exploration
+* recovery
+* next anchor push
+* logistics bridge
+________________
+
+
+9) Movement / traveler state fields
+These help determine what is physically appropriate next.
+________________
+
+
+9.1 current_lat, current_lng
+Optional if live location exists.
+Useful for:
+* local food insertion
+* weather comfort logic
+* movement-aware sequencing
+________________
+
+
+9.2 movement_state
+Possible values:
+* STATIONARY
+* SLOW_WALKING
+* ACTIVE_WALKING
+* TRANSIT
+* IN_VEHICLE
+* UNKNOWN
+Populate from:
+* GPS delta
+* last clicked directions
+* feed behavior
+* route state
+________________
+
+
+9.3 travel_mode
+Possible values:
+* WALKING
+* TRANSIT
+* CAR
+* MIXED
+* UNKNOWN
+This affects whether the feed can sequence:
+* scenic walk chains
+* indoor clusters
+* detour-heavy inserts
+* far anchor jumps
+________________
+
+
+10) Weather / comfort fields
+These are essential because sequencing should change how the day feels, not just what is “best”.
+________________
+
+
+10.1 weather_mode
+Examples:
+* HOT_CLEAR
+* HOT_HUMID
+* RAIN_LIGHT
+* RAIN_HEAVY
+* BREEZY_CLEAR
+* COLD_CLEAR
+* UNSETTLED
+Populate from weather layer.
+________________
+
+
+10.2 comfort_mode
+A simplified downstream interpretation.
+Examples:
+* HEAT_MANAGEMENT
+* RAIN_SHELTER
+* SCENIC_COMFORT
+* WALK_FRIENDLY
+* INDOOR_BIAS
+* NORMAL
+Formula idea
+comfort_mode =
+argmax(
+  heat_management_score,
+  rain_shelter_score,
+  scenic_comfort_score,
+  walk_friendliness_score,
+  indoor_bias_score
+)
+
+
+________________
+
+
+10.3 thermal_load_score
+Represents how punishing outdoor exposure feels.
+Suggested normalized formula (0–1)
+thermal_load_score =
+0.45 * temp_heat_norm
++ 0.25 * humidity_norm
++ 0.15 * uv_norm
++ 0.15 * solar_exposure_norm
+
+
+Example SQL (if weather data exists)
+SELECT
+(
+    0.45 * LEAST(GREATEST((temperature_c - 24) / 16, 0), 1)
+  + 0.25 * LEAST(humidity_pct / 100, 1)
+  + 0.15 * LEAST(uv_index / 10, 1)
+  + 0.15 * LEAST(solar_exposure_score, 1)
+) AS thermal_load_score
+FROM weather_context
+WHERE session_id = :session_id
+ORDER BY observed_at DESC
+LIMIT 1;
+
+
+________________
+
+
+10.4 precipitation_risk_score
+precipitation_risk_score =
+0.70 * precip_probability
++ 0.30 * precip_intensity_norm
+
+
+________________
+
+
+10.5 wind_comfort_score
+Wind can either help or hurt.
+Useful for:
+* scenic waterfront sequencing
+* rooftop opportunities
+* exposed walking discouragement
+________________
+
+
+11) Action horizon sequencing fields
+The feed top must be more actionable.
+________________
+
+
+11.1 action_horizon_bias
+Possible values:
+* DO_NOW_HEAVY
+* BALANCED
+* DO_SOON_FRIENDLY
+* TRIP_IMPORTANT_ALLOWED
+How to compute
+Based on:
+* time available now
+* current anchor certainty
+* whether user is browsing casually vs actively moving
+Formula
+do_now_bias_score =
+0.35 * proximity_intent_score
++ 0.25 * immediacy_score
++ 0.20 * movement_readiness_score
++ 0.20 * current_time_window_pressure
+
+
+Then:
+CASE
+    WHEN do_now_bias_score >= 0.72 THEN 'DO_NOW_HEAVY'
+    WHEN do_now_bias_score >= 0.50 THEN 'BALANCED'
+    WHEN do_now_bias_score >= 0.32 THEN 'DO_SOON_FRIENDLY'
+    ELSE 'TRIP_IMPORTANT_ALLOWED'
+END
+
+
+________________
+
+
+11.2 top_feed_urgency_score
+Represents how strongly the planner should bias the next few slots toward immediate action.
+Useful when:
+* sunset is close
+* lunch is open now
+* attraction closing soon
+* rain arriving
+* current location is already actionable
+________________
+
+
+12) Need-state fields (NEW v4 — extremely important)
+This is one of the biggest upgrades to make the feed feel human.
+The traveler does not only want “top attractions”.
+They also need:
+* lunch
+* shade
+* a reset
+* a coffee
+* a social evening plan
+* a short sit-down after too much walking
+This is where the feed becomes behaviorally realistic.
+________________
+
+
+12.1 meal_window_state
+Possible values:
+* BREAKFAST_WINDOW
+* LUNCH_WINDOW
+* DINNER_WINDOW
+* OFF_MEAL
+* SNACK_WINDOW
+* LATE_FOOD_WINDOW
+Suggested logic
+CASE
+    WHEN TIME(planning_ts) BETWEEN '07:00:00' AND '10:30:00' THEN 'BREAKFAST_WINDOW'
+    WHEN TIME(planning_ts) BETWEEN '12:00:00' AND '14:30:00' THEN 'LUNCH_WINDOW'
+    WHEN TIME(planning_ts) BETWEEN '16:00:00' AND '17:30:00' THEN 'SNACK_WINDOW'
+    WHEN TIME(planning_ts) BETWEEN '19:00:00' AND '21:30:00' THEN 'DINNER_WINDOW'
+    WHEN TIME(planning_ts) BETWEEN '21:30:00' AND '23:30:00' THEN 'LATE_FOOD_WINDOW'
+    ELSE 'OFF_MEAL'
+END
+
+
+________________
+
+
+12.2 break_need_score
+How strongly the sequence should insert a lighter / lower-friction / sit-down slot.
+Formula
+break_need_score =
+0.35 * fatigue_load_score
++ 0.20 * thermal_load_score
++ 0.15 * recent_heavy_count_norm
++ 0.15 * recent_long_count_norm
++ 0.15 * dwell_without_rest_norm
+
+
+________________
+
+
+12.3 fatigue_load_score
+Represents accumulated physical / cognitive burden.
+Suggested components
+fatigue_load_score =
+0.30 * walking_load_last_3h
++ 0.20 * attraction_density_load
++ 0.20 * queue_or_friction_load
++ 0.15 * heat_penalty
++ 0.15 * decision_fatigue_proxy
+
+
+Where:
+* walking_load_last_3h can come from estimated route distances or walking-based feed interactions
+* decision_fatigue_proxy can be increased if user has been scrolling without acting
+________________
+
+
+12.4 hunger_probability_score
+This helps insert food-related slots even when the user didn’t explicitly search for food.
+Formula
+hunger_probability_score =
+0.40 * meal_window_weight
++ 0.20 * time_since_last_food_interaction
++ 0.15 * fatigue_load_score
++ 0.15 * walking_load_last_3h
++ 0.10 * heat_adjustment
+
+
+________________
+
+
+12.5 hydration_need_score
+Especially useful in hot destinations.
+Formula
+hydration_need_score =
+0.50 * thermal_load_score
++ 0.20 * walking_load_last_2h
++ 0.15 * break_need_score
++ 0.15 * outdoor_exposure_score
+
+
+This helps surface:
+* café
+* shaded break
+* cool indoor stop
+* waterfront sit-down
+* juice / coffee / AC reset
+________________
+
+
+13) Opportunity override fields
+These allow temporary windows to interrupt normal sequencing.
+________________
+
+
+13.1 active_opportunity_class
+Examples:
+* SUNSET_WINDOW
+* GOLDEN_HOUR_VIEW
+* LOW_QUEUE_WINDOW
+* EVENING_SOCIAL_WINDOW
+* RAIN_ESCAPE_WINDOW
+* MARKET_HOURS_WINDOW
+* BEACH_CONDITION_WINDOW
+________________
+
+
+13.2 active_opportunity_strength
+How strong the override should be.
+Formula
+active_opportunity_strength =
+opportunity_score * opportunity_time_urgency * opportunity_uniqueness
+
+
+If this exceeds a threshold, the planner may temporarily force:
+* HERO_OPPORTUNITY_SLOT
+* SOCIAL_EVENING_SLOT
+* SUNSET_DESTINATION_SLOT
+* LOW_QUEUE_ACTION_SLOT
+This is one of the most important override mechanisms.
+________________
+
+
+14) Recent rhythm memory fields
+The planner must remember what it recently showed.
+Otherwise the feed becomes repetitive and exhausting.
+________________
+
+
+14.1 recent_heavy_count
+How many recent slots were physically / logistically / cognitively demanding.
+________________
+
+
+14.2 recent_long_count
+How many recent slots involved long commitment or long dwell.
+________________
+
+
+14.3 recent_indoor_count
+Useful for avoiding too much indoor stacking on a breezy scenic day.
+________________
+
+
+14.4 recent_food_count
+Useful for preventing too many restaurant inserts.
+________________
+
+
+14.5 recent_anchor_count
+How many recent slots were anchor-oriented.
+Used to decide if we should:
+* deepen
+* recover
+* transition
+________________
+
+
+14.6 recent_recovery_count
+How many recent low-friction decompression slots occurred.
+Used to avoid over-softening the feed.
+Example population query
+Assume you store recent rendered slots in feed_render_log.
+SELECT
+    SUM(CASE WHEN slot_intensity = 'HEAVY' THEN 1 ELSE 0 END) AS recent_heavy_count,
+    SUM(CASE WHEN slot_duration_class = 'LONG' THEN 1 ELSE 0 END) AS recent_long_count,
+    SUM(CASE WHEN slot_environment = 'INDOOR' THEN 1 ELSE 0 END) AS recent_indoor_count,
+    SUM(CASE WHEN slot_family = 'FOOD' THEN 1 ELSE 0 END) AS recent_food_count,
+    SUM(CASE WHEN slot_family = 'ANCHOR' THEN 1 ELSE 0 END) AS recent_anchor_count,
+    SUM(CASE WHEN slot_family = 'RECOVERY' THEN 1 ELSE 0 END) AS recent_recovery_count
+FROM feed_render_log
+WHERE session_id = :session_id
+  AND rendered_at >= DATE_SUB(NOW(), INTERVAL 3 HOUR);
+
+
+________________
+
+
+15) current_sequence_mode
+This is a high-level behavioral interpretation of the current feed phase.
+This field is extremely useful.
+Possible values:
+* ANCHOR_DEEPENING
+* ANCHOR_TO_ANCHOR_PROGRESS
+* RECOVERY_INSERTION
+* MEAL_RESOLUTION
+* WEATHER_ADAPTIVE
+* HERO_OPPORTUNITY_CAPTURE
+* EVENING_SOCIAL_BUILD
+* LATE_DAY_WINDDOWN
+* DISCOVERY_WANDER
+* TRIP_REASSURANCE
+How to compute
+This should be assigned using a priority rule stack.
+Example:
+CASE
+    WHEN active_opportunity_strength >= 0.82 THEN 'HERO_OPPORTUNITY_CAPTURE'
+    WHEN meal_window_state IN ('LUNCH_WINDOW','DINNER_WINDOW')
+         AND hunger_probability_score >= 0.65 THEN 'MEAL_RESOLUTION'
+    WHEN break_need_score >= 0.72 THEN 'RECOVERY_INSERTION'
+    WHEN comfort_mode IN ('HEAT_MANAGEMENT','RAIN_SHELTER') THEN 'WEATHER_ADAPTIVE'
+    WHEN anchor_progress_stage IN ('TRANSITIONING','MOVING_TO_NEXT') THEN 'ANCHOR_TO_ANCHOR_PROGRESS'
+    WHEN anchor_progress_stage IN ('ARRIVING','ORBITING') THEN 'ANCHOR_DEEPENING'
+    WHEN daypart IN ('EVENING','NIGHT') THEN 'EVENING_SOCIAL_BUILD'
+    ELSE 'DISCOVERY_WANDER'
+END
+
+
+This field strongly influences slot planning.
+________________
+
+
+16) TABLE 2 — sequence_slot_templates
+This table defines what kinds of slots exist.
+This is the planner’s vocabulary.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_slot_templates (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    slot_type VARCHAR(80) NOT NULL UNIQUE,
+    slot_family VARCHAR(60) NOT NULL,
+    slot_goal VARCHAR(80) NOT NULL,
+
+
+    requires_anchor TINYINT(1) DEFAULT 0,
+    requires_food_candidates TINYINT(1) DEFAULT 0,
+    requires_weather_fit TINYINT(1) DEFAULT 0,
+    requires_opportunity_fit TINYINT(1) DEFAULT 0,
+    requires_do_now_bias TINYINT(1) DEFAULT 0,
+
+
+    default_horizon_bias VARCHAR(40) NULL,
+    default_intensity VARCHAR(40) NULL,
+    default_duration_class VARCHAR(40) NULL,
+    default_environment_bias VARCHAR(40) NULL,
+
+
+    suppress_if_recent_count INT DEFAULT 0,
+    max_slots_per_10 INT DEFAULT 99,
+
+
+    priority_base_score DECIMAL(8,4) DEFAULT 0.0000,
+    is_active TINYINT(1) DEFAULT 1,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+________________
+
+
+17) Recommended slot types
+You should define at least the following:
+________________
+
+
+Anchor / movement slots
+* CURRENT_ANCHOR_SLOT
+* NEXT_ANCHOR_SLOT
+* ANCHOR_BRIDGE_SLOT
+* COMPOSITE_ANCHOR_SLOT
+* TRIP_IMPORTANT_SLOT
+________________
+
+
+Action / urgency slots
+* DO_NOW_ACTION_SLOT
+* LOW_QUEUE_ACTION_SLOT
+* TIME_SENSITIVE_SLOT
+* HERO_OPPORTUNITY_SLOT
+________________
+
+
+Recovery / rhythm slots
+* RECOVERY_SCENIC_SLOT
+* QUICK_BREAK_SLOT
+* LOW_FRICTION_DISCOVERY_SLOT
+* SHADED_RESET_SLOT
+* INDOOR_RESET_SLOT
+________________
+
+
+Food / need-state slots (NEW v4)
+* LUNCH_SLOT
+* DINNER_DESTINATION_SLOT
+* FOOD_COLLECTION_SLOT
+* COFFEE_BREAK_SLOT
+* SNACK_STOP_SLOT
+________________
+
+
+Evening / emotional progression slots
+* SOCIAL_EVENING_SLOT
+* SUNSET_DESTINATION_SLOT
+* GOLDEN_HOUR_SLOT
+* NIGHT_WANDER_SLOT
+* DAY_CLOSER_SLOT
+________________
+
+
+Support / reassurance slots
+* DO_SOON_SLOT
+* TRIP_REASSURANCE_SLOT
+* OPTIONAL_DETOUR_SLOT
+________________
+
+
+18) Example template inserts
+INSERT INTO sequence_slot_templates
+(slot_type, slot_family, slot_goal, requires_anchor, requires_food_candidates,
+ requires_weather_fit, requires_opportunity_fit, requires_do_now_bias,
+ default_horizon_bias, default_intensity, default_duration_class,
+ default_environment_bias, suppress_if_recent_count, max_slots_per_10, priority_base_score)
+VALUES
+('DO_NOW_ACTION_SLOT','ACTION','immediate_action',1,0,0,0,1,'DO_NOW','MEDIUM','SHORT','ANY',0,3,0.92),
+('NEXT_ANCHOR_SLOT','ANCHOR','forward_progression',1,0,0,0,0,'DO_NOW','MEDIUM','MEDIUM','ANY',1,2,0.88),
+('RECOVERY_SCENIC_SLOT','RECOVERY','decompression',0,0,1,0,0,'DO_NOW','LIGHT','SHORT','OUTDOOR',1,3,0.84),
+('LUNCH_SLOT','FOOD','need_state_resolution',0,1,1,0,1,'DO_NOW','LIGHT','MEDIUM','ANY',1,2,0.90),
+('FOOD_COLLECTION_SLOT','FOOD','choice_set',0,1,1,0,0,'DO_SOON','LIGHT','SHORT','ANY',1,2,0.82),
+('SOCIAL_EVENING_SLOT','EVENING','social_activation',0,1,1,1,0,'DO_SOON','MEDIUM','MEDIUM','ANY',1,2,0.83),
+('HERO_OPPORTUNITY_SLOT','OPPORTUNITY','capture_window',0,0,1,1,1,'DO_NOW','MEDIUM','MEDIUM','ANY',0,2,0.96);
+
+
+________________
+
+
+19) TABLE 3 — sequence_transition_rules
+This is where the actual feed rhythm becomes powerful.
+Instead of selecting slots independently, you define what should follow what.
+This is the core of “feed feel”.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_transition_rules (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    prev_slot_type VARCHAR(80) NOT NULL,
+    next_slot_type VARCHAR(80) NOT NULL,
+
+
+    transition_weight DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
+    transition_reason VARCHAR(255) NULL,
+
+
+    condition_anchor_stage VARCHAR(60) NULL,
+    condition_weather_mode VARCHAR(60) NULL,
+    condition_meal_window VARCHAR(60) NULL,
+    condition_sequence_mode VARCHAR(60) NULL,
+
+
+    is_hard_block TINYINT(1) DEFAULT 0,
+    is_active TINYINT(1) DEFAULT 1,
+
+
+    INDEX idx_prev_next (prev_slot_type, next_slot_type)
+);
+
+
+________________
+
+
+20) Why transition rules matter
+Without this, you may get:
+* anchor → anchor → anchor → anchor
+* museum → long museum → cathedral → long palace
+* lunch → snack → café → dinner
+* sunset → indoor museum
+That feels robotic.
+Transition rules let you encode:
+* heavy → recovery
+* anchor → decompression
+* recovery → do now
+* lunch → scenic / walk / next anchor
+* hero opportunity can interrupt almost anything
+________________
+
+
+21) Important transition rules to encode
+________________
+
+
+21.1 No heavy-heavy
+INSERT INTO sequence_transition_rules
+(prev_slot_type, next_slot_type, transition_weight, transition_reason, is_hard_block)
+VALUES
+('CURRENT_ANCHOR_SLOT','CURRENT_ANCHOR_SLOT',-0.70,'avoid repetitive heavy stacking',0),
+('DO_NOW_ACTION_SLOT','NEXT_ANCHOR_SLOT',-0.35,'avoid too much immediate structural pressure',0);
+
+
+________________
+
+
+21.2 Recovery after demanding slot
+INSERT INTO sequence_transition_rules
+(prev_slot_type, next_slot_type, transition_weight, transition_reason)
+VALUES
+('CURRENT_ANCHOR_SLOT','RECOVERY_SCENIC_SLOT',0.55,'decompress after anchor intensity'),
+('DO_NOW_ACTION_SLOT','QUICK_BREAK_SLOT',0.48,'insert relief after action');
+
+
+________________
+
+
+21.3 Meal window insertion
+INSERT INTO sequence_transition_rules
+(prev_slot_type, next_slot_type, transition_weight, transition_reason, condition_meal_window)
+VALUES
+('RECOVERY_SCENIC_SLOT','LUNCH_SLOT',0.65,'meal timing follows decompression','LUNCH_WINDOW'),
+('NEXT_ANCHOR_SLOT','DINNER_DESTINATION_SLOT',0.72,'evening progression into dinner','DINNER_WINDOW');
+
+
+________________
+
+
+21.4 Opportunity override
+INSERT INTO sequence_transition_rules
+(prev_slot_type, next_slot_type, transition_weight, transition_reason, condition_sequence_mode)
+VALUES
+('ANY','HERO_OPPORTUNITY_SLOT',0.90,'opportunity override when active','HERO_OPPORTUNITY_CAPTURE');
+
+
+________________
+
+
+22) TABLE 4 — sequence_rhythm_penalties
+This table lets you control feed pacing mathematically.
+Instead of hardcoding all rules, you create reusable penalties.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_rhythm_penalties (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    penalty_code VARCHAR(80) NOT NULL UNIQUE,
+    penalty_description VARCHAR(255) NULL,
+    penalty_weight DECIMAL(8,4) NOT NULL,
+    is_active TINYINT(1) DEFAULT 1
+);
+
+
+________________
+
+
+Suggested inserts
+INSERT INTO sequence_rhythm_penalties
+(penalty_code, penalty_description, penalty_weight)
+VALUES
+('HEAVY_AFTER_HEAVY','discourage demanding item after demanding item',0.65),
+('LONG_AFTER_LONG','discourage long dwell after long dwell',0.55),
+('FOOD_OVERSTACK','discourage too many food slots close together',0.60),
+('ANCHOR_SATURATION','discourage too many anchor-led slots in short window',0.62),
+('TOO_MUCH_INDOOR','discourage excessive indoor stacking on suitable outdoor conditions',0.35),
+('TOO_MUCH_RECOVERY','discourage over-softening the feed',0.28);
+
+
+________________
+
+
+23) TABLE 5 — sequence_slot_scores
+This is optional but highly recommended.
+It stores the score for each possible slot candidate before final slot selection.
+This makes the engine explainable and debuggable.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_slot_scores (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(120) NOT NULL,
+    planning_ts DATETIME NOT NULL,
+    slot_position INT NOT NULL,
+    slot_type VARCHAR(80) NOT NULL,
+
+
+    base_score DECIMAL(10,4) DEFAULT 0.0000,
+    anchor_progress_score DECIMAL(10,4) DEFAULT 0.0000,
+    rhythm_score DECIMAL(10,4) DEFAULT 0.0000,
+    opportunity_score DECIMAL(10,4) DEFAULT 0.0000,
+    weather_fit_score DECIMAL(10,4) DEFAULT 0.0000,
+    action_horizon_score DECIMAL(10,4) DEFAULT 0.0000,
+    need_state_score DECIMAL(10,4) DEFAULT 0.0000,
+    novelty_score DECIMAL(10,4) DEFAULT 0.0000,
+    suppression_penalty DECIMAL(10,4) DEFAULT 0.0000,
+    final_slot_score DECIMAL(10,4) DEFAULT 0.0000,
+
+
+    debug_reason VARCHAR(500) NULL,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    INDEX idx_session_slot (session_id, slot_position, final_slot_score)
+);
+
+
+________________
+
+
+24) How slot scores should be calculated
+This is the heart of the planner.
+For every possible slot type at every feed position, calculate:
+final_slot_score =
+base_score
++ anchor_progress_score
++ rhythm_score
++ opportunity_score
++ weather_fit_score
++ action_horizon_score
++ need_state_score
++ novelty_score
+- suppression_penalty
+
+
+________________
+
+
+25) Detailed scoring components
+________________
+
+
+25.1 base_score
+From template priority.
+base_score = slot_templates.priority_base_score
+
+
+________________
+
+
+25.2 anchor_progress_score
+Measures whether this slot fits where the traveler is in the anchor journey.
+Example logic
+anchor_progress_stage
+	good slot types
+	ARRIVING
+	CURRENT_ANCHOR_SLOT, DO_NOW_ACTION_SLOT
+	ORBITING
+	CURRENT_ANCHOR_SLOT, RECOVERY_SCENIC_SLOT, FOOD_COLLECTION_SLOT
+	SATURATING
+	RECOVERY_SCENIC_SLOT, QUICK_BREAK_SLOT, OPTIONAL_DETOUR_SLOT
+	TRANSITIONING
+	NEXT_ANCHOR_SLOT, ANCHOR_BRIDGE_SLOT
+	MOVING_TO_NEXT
+	NEXT_ANCHOR_SLOT, DO_SOON_SLOT
+	Example formula
+CASE
+    WHEN anchor_progress_stage = 'ARRIVING' AND slot_type IN ('CURRENT_ANCHOR_SLOT','DO_NOW_ACTION_SLOT') THEN 0.30
+    WHEN anchor_progress_stage = 'ORBITING' AND slot_type IN ('CURRENT_ANCHOR_SLOT','RECOVERY_SCENIC_SLOT','FOOD_COLLECTION_SLOT') THEN 0.25
+    WHEN anchor_progress_stage = 'SATURATING' AND slot_type IN ('RECOVERY_SCENIC_SLOT','QUICK_BREAK_SLOT','OPTIONAL_DETOUR_SLOT') THEN 0.35
+    WHEN anchor_progress_stage IN ('TRANSITIONING','MOVING_TO_NEXT') AND slot_type IN ('NEXT_ANCHOR_SLOT','ANCHOR_BRIDGE_SLOT') THEN 0.40
+    ELSE 0
+END
+
+
+________________
+
+
+25.3 rhythm_score
+Encodes pacing.
+Example rhythm formula
+rhythm_score =
+recovery_fit_bonus
++ variety_bonus
+- heavy_after_heavy_penalty
+- long_after_long_penalty
+- anchor_saturation_penalty
+
+
+Example SQL idea
+CASE
+    WHEN recent_heavy_count >= 2 AND slot_type IN ('RECOVERY_SCENIC_SLOT','QUICK_BREAK_SLOT','LUNCH_SLOT') THEN 0.35
+    WHEN recent_heavy_count >= 2 AND slot_type IN ('CURRENT_ANCHOR_SLOT','NEXT_ANCHOR_SLOT') THEN -0.30
+    WHEN recent_food_count >= 1 AND slot_type IN ('LUNCH_SLOT','DINNER_DESTINATION_SLOT','FOOD_COLLECTION_SLOT') THEN -0.25
+    ELSE 0
+END
+
+
+________________
+
+
+25.4 opportunity_score
+Used when temporary windows are active.
+Formula
+opportunity_score =
+active_opportunity_strength * slot_opportunity_compatibility
+
+
+Where slot compatibility might be:
+slot_type
+	compatibility
+	HERO_OPPORTUNITY_SLOT
+	1.00
+	SUNSET_DESTINATION_SLOT
+	0.95
+	SOCIAL_EVENING_SLOT
+	0.85
+	DO_NOW_ACTION_SLOT
+	0.70
+	RECOVERY_SCENIC_SLOT
+	0.50
+	________________
+
+
+25.5 weather_fit_score
+This is crucial.
+Examples:
+* hot weather → boost shade / indoor / short slots
+* rain → boost covered transitions / indoor
+* breezy evening → boost scenic walking / waterfront / sunset
+Example logic
+CASE
+    WHEN comfort_mode = 'HEAT_MANAGEMENT'
+         AND slot_type IN ('QUICK_BREAK_SLOT','SHADED_RESET_SLOT','INDOOR_RESET_SLOT','LUNCH_SLOT')
+         THEN 0.35
+    WHEN comfort_mode = 'RAIN_SHELTER'
+         AND slot_type IN ('INDOOR_RESET_SLOT','FOOD_COLLECTION_SLOT','LUNCH_SLOT','DO_SOON_SLOT')
+         THEN 0.32
+    WHEN comfort_mode = 'SCENIC_COMFORT'
+         AND slot_type IN ('RECOVERY_SCENIC_SLOT','SUNSET_DESTINATION_SLOT','NEXT_ANCHOR_SLOT')
+         THEN 0.28
+    ELSE 0
+END
+
+
+________________
+
+
+25.6 action_horizon_score
+Top of feed should be more “Do Now”.
+Formula
+action_horizon_score =
+slot_horizon_compatibility * top_feed_urgency_score * feed_position_weight
+
+
+Where:
+feed_position_weight =
+1.00 for slots 1–3
+0.75 for slots 4–6
+0.45 for slots 7–10
+0.20 for lower slots
+
+
+So “Do Now” slots dominate higher positions.
+________________
+
+
+25.7 need_state_score
+This is one of the strongest scores in v4.
+Example logic
+CASE
+    WHEN meal_window_state = 'LUNCH_WINDOW'
+         AND hunger_probability_score >= 0.65
+         AND slot_type IN ('LUNCH_SLOT','FOOD_COLLECTION_SLOT')
+         THEN 0.45
+
+
+    WHEN meal_window_state = 'DINNER_WINDOW'
+         AND hunger_probability_score >= 0.60
+         AND slot_type IN ('DINNER_DESTINATION_SLOT','SOCIAL_EVENING_SLOT','FOOD_COLLECTION_SLOT')
+         THEN 0.48
+
+
+    WHEN break_need_score >= 0.70
+         AND slot_type IN ('QUICK_BREAK_SLOT','RECOVERY_SCENIC_SLOT','COFFEE_BREAK_SLOT','SHADED_RESET_SLOT')
+         THEN 0.42
+
+
+    ELSE 0
+END
+
+
+This is what makes the feed feel alive instead of static.
+________________
+
+
+25.8 novelty_score
+Encourages variety.
+Formula
+novelty_score =
+1 - recent_slot_family_frequency
+
+
+If the last 5 slots were anchor-heavy, then recovery / food / scenic gets a boost.
+________________
+
+
+25.9 suppression_penalty
+Used to suppress overused or contextually bad slot types.
+Formula examples
+CASE
+    WHEN recent_food_count >= 2 AND slot_type IN ('LUNCH_SLOT','DINNER_DESTINATION_SLOT','FOOD_COLLECTION_SLOT') THEN 0.35
+    WHEN recent_anchor_count >= 4 AND slot_type IN ('CURRENT_ANCHOR_SLOT','NEXT_ANCHOR_SLOT') THEN 0.40
+    WHEN recent_recovery_count >= 2 AND slot_type IN ('RECOVERY_SCENIC_SLOT','QUICK_BREAK_SLOT') THEN 0.22
+    ELSE 0
+END
+
+
+________________
+
+
+26) TABLE 6 — sequence_plan_output
+This is the final output of the module.
+________________
+
+
+Recommended schema
+CREATE TABLE sequence_plan_output (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(120) NOT NULL,
+    planning_ts DATETIME NOT NULL,
+    slot_position INT NOT NULL,
+
+
+    slot_type VARCHAR(80) NOT NULL,
+    slot_family VARCHAR(60) NULL,
+    slot_goal VARCHAR(80) NULL,
+
+
+    anchor_relation VARCHAR(60) NULL,
+    horizon_bias VARCHAR(40) NULL,
+    sequence_mode VARCHAR(60) NULL,
+
+
+    planned_score DECIMAL(10,4) DEFAULT 0.0000,
+    planning_reason VARCHAR(500) NULL,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_session_position (session_id, planning_ts, slot_position),
+    INDEX idx_session (session_id, planning_ts)
+);
+
+
+________________
+
+
+27) How to generate the actual slot plan
+This should be done as a greedy sequential planner.
+Why greedy is good here:
+* easy to debug
+* deterministic
+* controllable
+* works well with transition/rhythm logic
+________________
+
+
+28) Sequence planning algorithm
+For each feed position:
+Step 1
+Load current sequence_context_state
+Step 2
+Generate all eligible slot types from sequence_slot_templates
+Step 3
+Score every slot using:
+final_slot_score =
+base_score
++ anchor_progress_score
++ rhythm_score
++ opportunity_score
++ weather_fit_score
++ action_horizon_score
++ need_state_score
++ novelty_score
+- suppression_penalty
+
+
+Step 4
+Apply transition rule bonus/penalty using previous selected slot
+Step 5
+Pick top slot
+Step 6
+Write it to sequence_plan_output
+Step 7
+Update temporary state memory:
+* recent_heavy_count
+* recent_food_count
+* recent_anchor_count
+* recent_recovery_count
+* feed_depth_position
+Step 8
+Repeat for next slot position
+________________
+
+
+29) Pseudocode
+function build_sequence_plan(session_id, planning_ts, n_slots = 12):
+
+
+    state = load_sequence_context_state(session_id, planning_ts)
+    plan = []
+    temp_memory = initialize_from_recent_feed(session_id)
+
+
+    for pos in 1..n_slots:
+        candidate_slots = get_active_slot_templates()
+
+
+        scored = []
+
+
+        for slot in candidate_slots:
+            score =
+                base_score(slot)
+              + anchor_progress_score(slot, state)
+              + rhythm_score(slot, temp_memory, state)
+              + opportunity_score(slot, state)
+              + weather_fit_score(slot, state)
+              + action_horizon_score(slot, state, pos)
+              + need_state_score(slot, state)
+              + novelty_score(slot, temp_memory)
+              - suppression_penalty(slot, temp_memory, state)
+
+
+            score += transition_bonus(prev_slot, slot, state)
+
+
+            if eligible(slot, state, temp_memory):
+                scored.append(slot, score)
+
+
+        best_slot = argmax(scored)
+        plan.append(best_slot)
+
+
+        temp_memory = update_temp_memory(temp_memory, best_slot)
+        state = optionally_update_state_after_slot(state, best_slot)
+
+
+    return plan
+
+
+________________
+
+
+30) Eligibility rules (important)
+A slot should not always be eligible.
+You should build hard filters before scoring.
+________________
+
+
+Examples
+LUNCH_SLOT
+Eligible only if:
+meal_window_state in ('LUNCH_WINDOW')
+OR hunger_probability_score >= 0.75
+
+
+________________
+
+
+DINNER_DESTINATION_SLOT
+Eligible only if:
+daypart in ('EVENING','NIGHT')
+OR meal_window_state = 'DINNER_WINDOW'
+
+
+________________
+
+
+HERO_OPPORTUNITY_SLOT
+Eligible only if:
+active_opportunity_strength >= 0.70
+
+
+________________
+
+
+NEXT_ANCHOR_SLOT
+Eligible only if:
+next_anchor_entity_id IS NOT NULL
+AND anchor_progress_stage IN ('TRANSITIONING','MOVING_TO_NEXT','SATURATING')
+
+
+________________
+
+
+RECOVERY_SCENIC_SLOT
+Eligible only if:
+break_need_score >= 0.35
+OR recent_heavy_count >= 1
+OR recent_long_count >= 1
+
+
+________________
+
+
+31) Important planning behavior rules you should encode
+This is the “human feel” layer.
+________________
+
+
+Rule 1 — Top of feed must stay actionable
+Positions 1–3 should heavily prefer:
+* DO_NOW_ACTION_SLOT
+* CURRENT_ANCHOR_SLOT
+* LOW_QUEUE_ACTION_SLOT
+* LUNCH_SLOT
+* HERO_OPPORTUNITY_SLOT
+Avoid starting the feed with:
+* generic collections
+* too much “maybe later”
+* vague inspiration
+________________
+
+
+Rule 2 — No structural overload
+Avoid too many of these close together:
+* CURRENT_ANCHOR_SLOT
+* NEXT_ANCHOR_SLOT
+* COMPOSITE_ANCHOR_SLOT
+* TRIP_IMPORTANT_SLOT
+The traveler should not feel constantly “pushed”.
+________________
+
+
+Rule 3 — Every demanding run should have relief
+After 1–2 heavy slots, insert one of:
+* RECOVERY_SCENIC_SLOT
+* QUICK_BREAK_SLOT
+* COFFEE_BREAK_SLOT
+* FOOD_COLLECTION_SLOT
+________________
+
+
+Rule 4 — Need-state can override elegance
+If it is 1:20 PM and the traveler has been walking for hours:
+A lunch or break insert is more correct than another iconic attraction.
+This rule matters a lot.
+________________
+
+
+Rule 5 — Opportunity windows can temporarily hijack the sequence
+If sunset / low queue / market closing / weather opening is active:
+That may override normal anchor progression.
+This makes the feed feel smart instead of static.
+________________
+
+
+Rule 6 — Lower feed can hold reassurance / later ideas
+Positions 7+ can include:
+* DO_SOON_SLOT
+* TRIP_IMPORTANT_SLOT
+* OPTIONAL_DETOUR_SLOT
+* TRIP_REASSURANCE_SLOT
+This is where the feed says:
+“Not now, but don’t miss this later.”
+________________
+
+
+32) Recommended slot distribution by feed depth
+This is very useful operationally.
+________________
+
+
+Positions 1–3 (Top of feed)
+Bias toward:
+* immediate action
+* current anchor
+* urgent opportunity
+* current need state
+Ideal families:
+* ACTION
+* ANCHOR
+* FOOD (if timely)
+* OPPORTUNITY
+________________
+
+
+Positions 4–6 (Middle action layer)
+Bias toward:
+* rhythm balancing
+* transition
+* recovery
+* next movement
+Ideal families:
+* RECOVERY
+* ANCHOR
+* FOOD
+* EVENING
+* OPPORTUNITY
+________________
+
+
+Positions 7–12 (Support layer)
+Bias toward:
+* reassurance
+* optionality
+* later planning
+* trip-level importance
+Ideal families:
+* DO_SOON
+* TRIP_IMPORTANT
+* OPTIONAL
+* COLLECTION
+* EVENING
+________________
+
+
+33) Recommended SQL population flow
+This is how you should operationalize the module.
+________________
+
+
+Step A — Populate sequence_context_state
+Use joins from:
+* role assignment output
+* structural importance output
+* opportunity engine output
+* action horizon output
+* weather layer
+* recent feed log
+* user interaction state
+________________
+
+
+Example insertion pattern
+INSERT INTO sequence_context_state (
+    session_id,
+    user_id,
+    trip_id,
+    planning_ts,
+    local_date,
+    local_hour,
+    local_minute,
+    daypart,
+    current_anchor_entity_id,
+    next_anchor_entity_id,
+    current_anchor_strength,
+    next_anchor_strength,
+    anchor_progress_stage,
+    weather_mode,
+    comfort_mode,
+    thermal_load_score,
+    precipitation_risk_score,
+    action_horizon_bias,
+    top_feed_urgency_score,
+    meal_window_state,
+    break_need_score,
+    fatigue_load_score,
+    hunger_probability_score,
+    hydration_need_score,
+    active_opportunity_class,
+    active_opportunity_strength,
+    recent_heavy_count,
+    recent_long_count,
+    recent_indoor_count,
+    recent_food_count,
+    recent_anchor_count,
+    recent_recovery_count,
+    current_sequence_mode,
+    feed_depth_position
+)
+SELECT
+    :session_id,
+    :user_id,
+    :trip_id,
+    NOW(),
+    CURDATE(),
+    HOUR(NOW()),
+    MINUTE(NOW()),
+    CASE
+        WHEN HOUR(NOW()) BETWEEN 5 AND 9 THEN 'EARLY_MORNING'
+        WHEN HOUR(NOW()) BETWEEN 10 AND 11 THEN 'LATE_MORNING'
+        WHEN HOUR(NOW()) BETWEEN 12 AND 14 THEN 'LUNCH'
+        WHEN HOUR(NOW()) BETWEEN 15 AND 17 THEN 'AFTERNOON'
+        WHEN HOUR(NOW()) BETWEEN 18 AND 20 THEN 'EVENING'
+        WHEN HOUR(NOW()) BETWEEN 21 AND 23 THEN 'NIGHT'
+        ELSE 'LATE_NIGHT'
+    END,
+    :current_anchor_entity_id,
+    :next_anchor_entity_id,
+    :current_anchor_strength,
+    :next_anchor_strength,
+    :anchor_progress_stage,
+    :weather_mode,
+    :comfort_mode,
+    :thermal_load_score,
+    :precipitation_risk_score,
+    :action_horizon_bias,
+    :top_feed_urgency_score,
+    :meal_window_state,
+    :break_need_score,
+    :fatigue_load_score,
+    :hunger_probability_score,
+    :hydration_need_score,
+    :active_opportunity_class,
+    :active_opportunity_strength,
+    :recent_heavy_count,
+    :recent_long_count,
+    :recent_indoor_count,
+    :recent_food_count,
+    :recent_anchor_count,
+    :recent_recovery_count,
+    :current_sequence_mode,
+    0;
+
+
+________________
+
+
+34) Recommended planner execution architecture
+You should implement this as:
+Option A — SQL + Laravel service
+Best for your current stack.
+Suggested service:
+app/Services/SequencePlannerService.php
+
+
+Functions:
+buildSequenceContextState($sessionId, $tripId, $userId = null)
+scoreSlotCandidates($state, $slotPosition, $tempMemory)
+selectBestSlot($scoredCandidates)
+generateSequencePlan($sessionId, $tripId, $slotCount = 12)
+persistSequencePlan($sessionId, $plan)
+
+
+________________
+
+
+35) Best production design choice for your system
+For your travel feed, the best architecture is:
+Hybrid system
+SQL handles:
+* context state aggregation
+* upstream joins
+* slot template storage
+* transition rules
+* score logging
+Laravel/PHP handles:
+* sequential planning loop
+* greedy slot selection
+* temporary memory updates
+* explainability
+* debug outputs
+This is much better than trying to do everything in one giant SQL query.
+________________
+
+
+36) Final mental model of this engine
+Think of the Sequence Planner as a day rhythm composer.
+It does not ask:
+“What’s the best POI?”
+It asks:
+“What should this traveler need, feel, and be ready for next?”
+That is a much more powerful feed logic.
+________________
+
+
+37) Final module output summary
+This module should produce:
+* a context-aware slot plan
+* ordered by journey logic
+* balanced for:
+   * structure
+   * rhythm
+   * comfort
+   * opportunity
+   * need state
+   * urgency
+   * progression
+And then downstream modules can fill those slots with exact POIs, collections, restaurants, and actions.
+________________
+
+
+38) Strong recommendation: the most important v4 upgrades
+If you want this module to feel genuinely advanced, the highest-value additions are:
+Must-have
+* anchor_progress_stage
+* current_sequence_mode
+* break_need_score
+* hunger_probability_score
+* active_opportunity_strength
+* transition_rules
+* rhythm penalties
+* slot scoring log
+Very high leverage
+* FOOD_COLLECTION_SLOT
+* LUNCH_SLOT
+* DINNER_DESTINATION_SLOT
+* QUICK_BREAK_SLOT
+* SOCIAL_EVENING_SLOT
+These are exactly what will stop your feed from feeling like “Tripadvisor sorted by score”.
+________________
+
+
+If you want, I can do the next step in full implementation detail:
+Sequence Planner Engine — complete Laravel + SQL implementation
+including:
+* all migrations
+* seeders
+* Laravel service class
+* scoring functions
+* greedy planner loop
+* sample debug output
+* how it connects to your existing entity/role/opportunity/action-horizon pipeline
+That would give you the actual build-ready version of Module 8.

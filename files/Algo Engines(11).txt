@@ -1,0 +1,412 @@
+﻿MODULE — Environment State Layer (Final Spec)
+Purpose
+Create a single, continuously updated snapshot of real-world conditions around the user.
+This layer feeds into:
+* Opportunity Engine
+* Eligibility Engine
+* Sequence Planner
+* Moment Framing
+________________
+
+
+1. DATA MODEL (FINAL)
+environment_state
+-----------------
+location_id
+timestamp_utc
+
+
+-- Time
+current_time_local
+daypart
+sunrise_time
+sunset_time
+minutes_to_sunset
+minutes_since_sunrise
+
+
+-- Weather
+weather_type
+temperature_c
+feels_like_c
+humidity
+wind_speed_kmh
+precipitation_mm
+
+
+-- Comfort
+heat_stress_level
+rain_discomfort_level
+sun_exposure_level
+wind_discomfort_level
+thermal_comfort_score
+
+
+-- Scenic
+visibility_quality
+sunset_quality
+viewpoint_quality
+
+
+-- Area energy
+area_happening_score
+area_energy_state
+
+
+-- Meta
+data_confidence_score
+last_updated_at
+
+
+________________
+
+
+2. TIME / DAY STATE
+Fields Explained
+2.1 current_time_local
+* User’s local time at location
+* Derived via timezone mapping
+SELECT NOW() AT TIME ZONE location_timezone
+
+
+________________
+
+
+2.2 daypart
+Represents behavioral context, not just time.
+Daypart
+	Time Range
+	early_morning
+	sunrise → +2h
+	morning
+	+2h → 11:30
+	midday
+	11:30 → 15:30
+	afternoon
+	15:30 → sunset-1h
+	golden_hour
+	sunset-1h → sunset
+	evening
+	sunset → +2h
+	night
+	after +2h
+	CASE
+  WHEN now BETWEEN sunrise AND sunrise + INTERVAL '2 hour' THEN 'early_morning'
+  WHEN now < TIME '11:30' THEN 'morning'
+  WHEN now < TIME '15:30' THEN 'midday'
+  WHEN now < sunset - INTERVAL '1 hour' THEN 'afternoon'
+  WHEN now <= sunset THEN 'golden_hour'
+  WHEN now <= sunset + INTERVAL '2 hour' THEN 'evening'
+  ELSE 'night'
+END
+
+
+________________
+
+
+2.3 minutes_to_sunset
+EXTRACT(EPOCH FROM (sunset - now)) / 60
+
+
+Used heavily for:
+* urgency scoring
+* golden hour triggers
+________________
+
+
+3. WEATHER STATE
+Fields Explained
+3.1 weather_type
+Normalize external API into controlled enum:
+Raw → Normalized
+	drizzle/light rain → rain
+	thunderstorm → storm
+	haze/smog → fog
+	________________
+
+
+3.2 Raw Weather Inputs
+From API (OpenWeather, etc.)
+temp
+feels_like
+humidity
+wind_speed
+rain_1h
+clouds
+visibility
+
+
+________________
+
+
+3.3 Storage Mapping
+temperature_c = api.temp
+feels_like_c = api.feels_like
+humidity = api.humidity
+wind_speed_kmh = api.wind_speed * 3.6
+precipitation_mm = api.rain_1h
+
+
+________________
+
+
+4. COMFORT STATE
+This is where things get intelligent.
+________________
+
+
+4.1 Heat Stress Level
+Accounts for:
+* temperature
+* humidity
+Formula (simplified heat index logic)
+heat_index =
+  temperature_c + (0.33 * humidity/100 * 6.105 * e^(17.27 * temperature / (237.7 + temperature)))
+  - 4
+
+
+Bucketing
+Value
+	Level
+	< 25
+	low
+	25–32
+	moderate
+	32–40
+	high
+	> 40
+	extreme
+	________________
+
+
+4.2 Rain Discomfort Level
+CASE
+  WHEN precipitation_mm = 0 THEN 0
+  WHEN precipitation_mm < 1 THEN 0.3
+  WHEN precipitation_mm < 5 THEN 0.6
+  ELSE 1
+END
+
+
+________________
+
+
+4.3 Sun Exposure Level
+Uses:
+* UV index (if available)
+* fallback: cloud cover
+sun_exposure =
+CASE
+  WHEN uv_index >= 8 THEN 1
+  WHEN uv_index >= 5 THEN 0.7
+  WHEN cloud_cover > 70 THEN 0.2
+  ELSE 0.5
+END
+
+
+________________
+
+
+4.4 Wind Discomfort
+CASE
+  WHEN wind_speed_kmh < 10 THEN 0
+  WHEN wind_speed_kmh < 25 THEN 0.4
+  WHEN wind_speed_kmh < 40 THEN 0.7
+  ELSE 1
+END
+
+
+________________
+
+
+4.5 Thermal Comfort Score (CORE METRIC)
+Final normalized score (0–100)
+thermal_comfort_score =
+  100
+  - (heat_stress_level * 25)
+  - (rain_discomfort_level * 20)
+  - (wind_discomfort_level * 15)
+  - (sun_exposure_level * 10)
+
+
+Clamp between 0–100.
+________________
+
+
+5. SCENIC CONDITION STATE
+This is what makes your system feel magical.
+________________
+
+
+5.1 Visibility Quality
+Uses:
+* visibility (meters)
+* humidity
+* pollution (optional)
+visibility_quality =
+CASE
+  WHEN visibility > 10000 THEN 1
+  WHEN visibility > 5000 THEN 0.7
+  WHEN visibility > 2000 THEN 0.4
+  ELSE 0.1
+END
+
+
+________________
+
+
+5.2 Sunset Quality  (VERY IMPORTANT)
+Derived from:
+* cloud coverage
+* humidity
+* pollution
+Ideal conditions:
+* partial clouds (20–60%)
+* low humidity
+sunset_quality =
+  (1 - ABS(cloud_cover - 40)/40)
+  * (1 - humidity/100)
+
+
+Clamp between 0–1.
+________________
+
+
+5.3 Viewpoint Quality
+viewpoint_quality =
+  visibility_quality * (1 - rain_discomfort_level)
+
+
+________________
+
+
+6. AREA ENERGY STATE
+This is behavioral + environmental hybrid intelligence
+________________
+
+
+6.1 area_happening_score
+Composite score from:
+Signal
+	Source
+	footfall density
+	historical + live
+	time-of-day multiplier
+	static
+	event density
+	events DB
+	venue open ratio
+	POI data
+	________________
+
+
+Formula
+area_happening_score =
+  (footfall_score * 0.4)
+  + (time_multiplier * 0.2)
+  + (event_density * 0.2)
+  + (open_venue_ratio * 0.2)
+
+
+________________
+
+
+Time Multiplier Example
+Time
+	Multiplier
+	morning
+	0.6
+	afternoon
+	0.8
+	evening
+	1.0
+	night
+	0.9
+	________________
+
+
+6.2 area_energy_state
+CASE
+  WHEN score > 0.75 THEN 'high'
+  WHEN score > 0.4 THEN 'medium'
+  ELSE 'low'
+END
+
+
+________________
+
+
+7. DATA CONFIDENCE LAYER
+data_confidence_score
+Based on:
+* freshness
+* missing fields
+* API reliability
+confidence =
+  (freshness_score * 0.5)
+  + (completeness_score * 0.3)
+  + (source_reliability * 0.2)
+
+
+________________
+
+
+8. UPDATE STRATEGY
+Field Group
+	Frequency
+	time
+	real-time
+	weather
+	every 10–15 min
+	comfort
+	computed per update
+	scenic
+	computed per update
+	area energy
+	every 30–60 min
+	________________
+
+
+9. PIPELINE FLOW
+Weather API → Normalize → Store Raw
+
+
+↓
+Compute Time State
+
+
+↓
+Compute Comfort Metrics
+
+
+↓
+Compute Scenic Metrics
+
+
+↓
+Compute Area Energy
+
+
+↓
+Store Final Snapshot
+
+
+________________
+
+
+10. WHY THIS LAYER IS POWERFUL
+This layer enables:
+* “Go now before sunset”
+* “Skip this, too hot right now”
+* “Perfect weather for viewpoint”
+* “This area is buzzing tonight”
+Without this → your feed feels static
+With this → your feed feels alive
+________________
+
+
+NEXT STEP
+If you want, next we can:
+👉 Plug this into your Opportunity Engine (Module 4)
+→ where these signals actually change ranking behavior
+That’s where this layer becomes money.

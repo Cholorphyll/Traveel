@@ -1,0 +1,2140 @@
+﻿MODULE 6 — ROLE ASSIGNMENT ENGINE
+Full SQL / Table / Computation Spec
+________________
+
+
+6.0 Purpose
+The Role Assignment Engine determines:
+“What function should this item play in the feed right now?”
+It converts upstream scores into feed jobs.
+This is the module that decides whether an item is acting as:
+* a main destination
+* a next move
+* a recovery stop
+* a meal fit
+* a windowed opportunity
+* a scenic moment
+* a planning save
+* etc.
+This is not a ranking module.
+It is a semantic role layer that later helps the feed ranking module produce a more human-feeling sequence.
+________________
+
+
+6.1 Output Contract
+For each candidate item in the active feed context, the engine should output:
+Required fields
+* assigned_roles
+* role_confidence
+Strongly recommended production fields
+* primary_role
+* secondary_roles
+* role_group
+* role_reason_codes
+* primary_role_score
+* second_best_role_score
+* role_priority
+* role_selection_score
+________________
+
+
+6.2 Role Set (Final v1)
+We will use the following final role vocabulary.
+________________
+
+
+Structural roles
+* CURRENT_ANCHOR
+* NEXT_ANCHOR
+* COMPOSITE_ANCHOR
+* COLLECTIVE_DESTINATION
+* TRIP_IMPORTANT_ITEM
+Journey roles
+* RECOVERY_ITEM
+* TRANSITION_ITEM
+* DISCOVERY_ITEM
+* SCENIC_MOMENT
+Opportunity roles
+* HERO_EXPERIENCE
+* WINDOWED_EXPERIENCE
+* NIGHTLIFE_DRIVER
+Support roles
+* UTILITY_SUPPORT
+* SOCIAL_CLUSTER_ITEM
+Planning roles
+* DO_SOON_ITEM
+* NEXT_DAY_CANDIDATE
+Need-state roles
+* MEAL_WINDOW_ITEM
+* DINNER_DESTINATION
+* LUNCH_FIT_ITEM
+* QUICK_BREAK_ITEM
+* LATE_NIGHT_FOOD_ITEM
+________________
+
+
+6.3 System Architecture (Recommended)
+Use 3 tables + 1 view.
+________________
+
+
+Tables / View
+1. Input feature view
+vw_role_assignment_inputs
+
+
+2. Per-role scoring table
+trip_item_role_scores
+
+
+3. Final resolved role table
+trip_item_roles
+
+
+4. Optional config table
+role_threshold_config
+
+
+This structure is much better than a single giant unreadable query.
+________________
+
+
+6.4 TABLE 1 — Input Feature View
+This view should unify all upstream signals needed for role assignment.
+________________
+
+
+Create View — vw_role_assignment_inputs
+You can implement this as a SQL VIEW or a staging table populated per feed session.
+CREATE OR REPLACE VIEW vw_role_assignment_inputs AS
+SELECT
+    c.session_id,
+    c.trip_id,
+    c.user_id,
+    c.candidate_item_id,
+    c.candidate_item_type,
+    c.entity_id,
+    c.entity_type,
+
+
+    -- identity / item flags
+    c.is_landmark,
+    c.is_area,
+    c.is_restaurant,
+    c.is_cafe,
+    c.is_nightlife,
+    c.is_viewpoint,
+    c.is_scenic,
+    c.is_quick_stop,
+    c.is_high_commitment,
+    c.is_utility,
+    c.is_social_area,
+
+
+    -- item behavior / metadata
+    c.avg_dwell_minutes,
+    c.quick_service_score,
+    c.low_effort_access_score,
+    c.seat_likelihood_score,
+    c.shade_score,
+    c.calmness_score,
+    c.visual_reward_score,
+    c.photo_value_score,
+    c.wow_factor_score,
+    c.local_character_score,
+    c.novelty_score,
+    c.serendipity_score,
+    c.cluster_energy_score,
+    c.lingerability_score,
+    c.walkability_score,
+    c.surrounding_density_score,
+    c.experience_variety_score,
+    c.cluster_identity_score,
+    c.destination_signature_score,
+    c.rarity_score,
+    c.utility_score,
+    c.impulse_stop_score,
+    c.destination_dining_score,
+    c.dinner_ambience_score,
+    c.post_activity_recovery_fit,
+
+
+    -- real-time availability / access
+    c.opening_status_now,
+    c.open_now_score,
+    c.closing_soon_flag,
+    c.service_window_active,
+    c.late_open_score,
+    c.time_of_day_visual_fit,
+    c.weather_visual_bonus,
+    c.opening_window_future_fit,
+
+
+    -- route / movement
+    c.distance_meters,
+    c.travel_time_minutes,
+    c.detour_cost_minutes,
+    c.direction_alignment_score,
+    c.same_area_cluster_score,
+    c.next_leg_alignment_score,
+    c.forward_route_fit,
+    c.route_alignment_score,
+    c.route_convenience_score,
+    c.midday_proximity_score,
+    c.short_distance_score,
+
+
+    -- structural engine outputs
+    s.structural_importance_score,
+    s.anchor_score,
+    s.composite_anchor_score,
+    s.collective_destination_score,
+    s.trip_importance_score,
+
+
+    -- opportunity engine outputs
+    o.opportunity_score,
+    o.sunset_window_score,
+    o.meal_window_score,
+    o.nightlife_window_score,
+    o.weather_window_score,
+    o.limited_access_window_score,
+    o.crowd_advantage_window_score,
+    o.window_strength_score,
+    o.time_sensitivity_score,
+    o.window_uniqueness_score,
+    o.reachability_before_window_end,
+
+
+    -- action horizon engine outputs
+    a.do_now_score,
+    a.do_soon_score,
+    a.do_later_score,
+    a.next_day_score,
+
+
+    -- context engine outputs
+    x.context_relevance_score,
+    x.movement_fit_score,
+    x.pace_fit_score,
+    x.energy_fit_score,
+    x.weather_fit_score,
+    x.social_fit_score,
+    x.mood_fit_score,
+    x.meal_fit_score,
+    x.recovery_fit_score,
+    x.scenic_fit_score,
+    x.night_fit_score,
+    x.transition_fit_score,
+    x.discovery_fit_score,
+
+
+    -- session / need-state / timing
+    st.local_time,
+    st.trip_day_index,
+    st.minutes_since_last_major_stop,
+    st.minutes_since_last_meal,
+    st.user_exploration_mode,
+    st.user_hunger_state,
+    st.user_fatigue_state,
+    st.session_energy_state,
+    st.evening_fit_score,
+    st.lunch_window_score,
+    st.hunger_need_score,
+    st.fatigue_need_score
+
+
+FROM trip_feed_candidates c
+LEFT JOIN trip_item_structural_scores s
+    ON s.session_id = c.session_id
+   AND s.trip_id = c.trip_id
+   AND s.user_id = c.user_id
+   AND s.candidate_item_id = c.candidate_item_id
+LEFT JOIN trip_item_opportunity_scores o
+    ON o.session_id = c.session_id
+   AND o.trip_id = c.trip_id
+   AND o.user_id = c.user_id
+   AND o.candidate_item_id = c.candidate_item_id
+LEFT JOIN trip_item_action_horizon_scores a
+    ON a.session_id = c.session_id
+   AND a.trip_id = c.trip_id
+   AND a.user_id = c.user_id
+   AND a.candidate_item_id = c.candidate_item_id
+LEFT JOIN trip_item_context_scores x
+    ON x.session_id = c.session_id
+   AND x.trip_id = c.trip_id
+   AND x.user_id = c.user_id
+   AND x.candidate_item_id = c.candidate_item_id
+LEFT JOIN trip_session_state st
+    ON st.session_id = c.session_id
+   AND st.trip_id = c.trip_id
+   AND st.user_id = c.user_id;
+
+
+________________
+
+
+6.5 Required Derived Inputs (Important)
+Some inputs should be derived before role scoring.
+You should calculate these once in your staging pipeline.
+________________
+
+
+6.5.1 immediate_accessibility_score
+CASE
+    WHEN opening_status_now = 1 AND travel_time_minutes <= 20 THEN 1.00
+    WHEN opening_status_now = 1 AND travel_time_minutes <= 35 THEN 0.75
+    WHEN opening_status_now = 1 AND travel_time_minutes <= 50 THEN 0.45
+    ELSE 0.10
+END
+
+
+________________
+
+
+6.5.2 accessibility_score
+CASE
+    WHEN travel_time_minutes <= 25 THEN 1.00
+    WHEN travel_time_minutes <= 40 THEN 0.70
+    WHEN travel_time_minutes <= 60 THEN 0.35
+    ELSE 0.10
+END
+
+
+________________
+
+
+6.5.3 low_detour_score
+CASE
+    WHEN detour_cost_minutes <= 5 THEN 1.00
+    WHEN detour_cost_minutes <= 10 THEN 0.75
+    WHEN detour_cost_minutes <= 15 THEN 0.45
+    ELSE 0.10
+END
+
+
+________________
+
+
+6.5.4 short_dwell_fit
+CASE
+    WHEN avg_dwell_minutes <= 20 THEN 1.00
+    WHEN avg_dwell_minutes <= 40 THEN 0.70
+    WHEN avg_dwell_minutes <= 60 THEN 0.40
+    ELSE 0.10
+END
+
+
+________________
+
+
+6.5.5 low_friction_score
+LEAST(
+    1.0,
+    (
+        0.40 * low_effort_access_score +
+        0.30 * open_now_score +
+        0.30 * (1 - LEAST(detour_cost_minutes / 20.0, 1.0))
+    )
+)
+
+
+________________
+
+
+6.5.6 low_commitment_score
+CASE
+    WHEN avg_dwell_minutes <= 30 AND is_high_commitment = 0 THEN 1.00
+    WHEN avg_dwell_minutes <= 60 THEN 0.70
+    WHEN avg_dwell_minutes <= 90 THEN 0.40
+    ELSE 0.15
+END
+
+
+________________
+
+
+6.5.7 signal_coverage_score
+This is for confidence later.
+(
+    (CASE WHEN structural_importance_score IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN context_relevance_score IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN opportunity_score IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN do_now_score IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN do_soon_score IS NOT NULL THEN 1 ELSE 0 END)
+) / 5.0
+
+
+________________
+
+
+6.6 TABLE 2 — Role Threshold Config
+This lets you tune thresholds without rewriting SQL.
+________________
+
+
+Create Table
+CREATE TABLE role_threshold_config (
+    role_name VARCHAR(80) PRIMARY KEY,
+    role_group VARCHAR(40),
+    min_role_score DECIMAL(6,4),
+    role_priority_weight DECIMAL(6,4),
+    is_active TINYINT(1) DEFAULT 1,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+________________
+
+
+Seed Data
+INSERT INTO role_threshold_config (role_name, role_group, min_role_score, role_priority_weight) VALUES
+('CURRENT_ANCHOR',        'structural', 0.72, 0.97),
+('NEXT_ANCHOR',           'structural', 0.68, 0.90),
+('COMPOSITE_ANCHOR',      'structural', 0.66, 0.84),
+('COLLECTIVE_DESTINATION','structural', 0.66, 0.86),
+('TRIP_IMPORTANT_ITEM',   'structural', 0.70, 0.58),
+
+
+('RECOVERY_ITEM',         'journey',    0.62, 0.75),
+('TRANSITION_ITEM',       'journey',    0.58, 0.55),
+('DISCOVERY_ITEM',        'journey',    0.60, 0.60),
+('SCENIC_MOMENT',         'journey',    0.64, 0.74),
+
+
+('HERO_EXPERIENCE',       'opportunity',0.75, 0.95),
+('WINDOWED_EXPERIENCE',   'opportunity',0.70, 1.00),
+('NIGHTLIFE_DRIVER',      'opportunity',0.66, 0.87),
+
+
+('UTILITY_SUPPORT',       'support',    0.55, 0.40),
+('SOCIAL_CLUSTER_ITEM',   'support',    0.60, 0.52),
+
+
+('DO_SOON_ITEM',          'planning',   0.62, 0.72),
+('NEXT_DAY_CANDIDATE',    'planning',   0.60, 0.45),
+
+
+('MEAL_WINDOW_ITEM',      'need_state', 0.60, 0.70),
+('DINNER_DESTINATION',    'need_state', 0.68, 0.88),
+('LUNCH_FIT_ITEM',        'need_state', 0.62, 0.66),
+('QUICK_BREAK_ITEM',      'need_state', 0.57, 0.50),
+('LATE_NIGHT_FOOD_ITEM',  'need_state', 0.62, 0.73);
+
+
+________________
+
+
+6.7 TABLE 3 — Per Role Scoring Table
+This table stores every role score for every candidate item.
+This is essential for:
+* explainability
+* debugging
+* role competition
+* downstream ranking
+________________
+
+
+Create Table
+CREATE TABLE trip_item_role_scores (
+    session_id BIGINT NOT NULL,
+    trip_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    candidate_item_id BIGINT NOT NULL,
+
+
+    role_name VARCHAR(80) NOT NULL,
+    role_group VARCHAR(40) NOT NULL,
+
+
+    role_score DECIMAL(8,6) NOT NULL,
+    eligible_flag TINYINT(1) NOT NULL,
+    role_priority_weight DECIMAL(8,6) NOT NULL,
+    role_selection_score DECIMAL(8,6) NOT NULL,
+
+
+    reason_codes_json JSON NULL,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    INDEX idx_role_session (session_id, trip_id, user_id),
+    INDEX idx_role_item (candidate_item_id),
+    INDEX idx_role_name (role_name),
+    INDEX idx_role_eligible (eligible_flag)
+);
+
+
+________________
+
+
+6.8 TABLE 4 — Final Resolved Role Output
+This is the table your downstream feed should use.
+________________
+
+
+Create Table
+CREATE TABLE trip_item_roles (
+    session_id BIGINT NOT NULL,
+    trip_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    candidate_item_id BIGINT NOT NULL,
+    candidate_item_type VARCHAR(50),
+
+
+    assigned_roles JSON NOT NULL,
+    primary_role VARCHAR(80) NOT NULL,
+    secondary_roles JSON NULL,
+    role_group VARCHAR(40) NOT NULL,
+
+
+    role_confidence DECIMAL(8,6) NOT NULL,
+    primary_role_score DECIMAL(8,6) NOT NULL,
+    second_best_role_score DECIMAL(8,6) NULL,
+    role_priority DECIMAL(8,6) NOT NULL,
+    role_selection_score DECIMAL(8,6) NOT NULL,
+
+
+    role_reason_codes JSON NULL,
+
+
+    evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    PRIMARY KEY (session_id, trip_id, user_id, candidate_item_id),
+    INDEX idx_primary_role (primary_role),
+    INDEX idx_role_group (role_group)
+);
+
+
+________________
+
+
+6.9 Computation Strategy
+For every candidate item:
+Step 1
+Compute a score for every role
+Step 2
+Mark roles as eligible if:
+role_score >= min_role_score
+
+
+Step 3
+Compute:
+role_selection_score = 0.80 * role_score + 0.20 * role_priority_weight
+
+
+Step 4
+Pick the highest role_selection_score among eligible roles as primary_role
+Step 5
+All other eligible roles become secondary_roles
+________________
+
+
+6.10 Role Score Formulas — Full SQL Spec
+Below is the production-ready formula set for all roles.
+________________
+
+
+STRUCTURAL ROLES
+________________
+
+
+6.10.1 CURRENT_ANCHOR
+INSERT INTO trip_item_role_scores (
+    session_id, trip_id, user_id, candidate_item_id,
+    role_name, role_group, role_score, eligible_flag,
+    role_priority_weight, role_selection_score, reason_codes_json
+)
+SELECT
+    v.session_id,
+    v.trip_id,
+    v.user_id,
+    v.candidate_item_id,
+
+
+    'CURRENT_ANCHOR',
+    'structural',
+
+
+    (
+        0.30 * v.structural_importance_score +
+        0.25 * v.context_relevance_score +
+        0.20 * v.do_now_score +
+        0.15 * v.anchor_score +
+        0.10 *
+        CASE
+            WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 20 THEN 1.00
+            WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 35 THEN 0.75
+            WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 50 THEN 0.45
+            ELSE 0.10
+        END
+    ) AS role_score,
+
+
+    CASE
+        WHEN (
+            0.30 * v.structural_importance_score +
+            0.25 * v.context_relevance_score +
+            0.20 * v.do_now_score +
+            0.15 * v.anchor_score +
+            0.10 *
+            CASE
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 20 THEN 1.00
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 35 THEN 0.75
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 50 THEN 0.45
+                ELSE 0.10
+            END
+        ) >= 0.72 THEN 1 ELSE 0
+    END,
+
+
+    0.97,
+
+
+    (
+        0.80 * (
+            0.30 * v.structural_importance_score +
+            0.25 * v.context_relevance_score +
+            0.20 * v.do_now_score +
+            0.15 * v.anchor_score +
+            0.10 *
+            CASE
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 20 THEN 1.00
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 35 THEN 0.75
+                WHEN v.opening_status_now = 1 AND v.travel_time_minutes <= 50 THEN 0.45
+                ELSE 0.10
+            END
+        )
+        + 0.20 * 0.97
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.structural_importance_score >= 0.75 THEN 'high_structural_importance' END,
+        CASE WHEN v.context_relevance_score >= 0.70 THEN 'high_context_fit' END,
+        CASE WHEN v.do_now_score >= 0.70 THEN 'high_do_now_fit' END,
+        CASE WHEN v.anchor_score >= 0.70 THEN 'strong_anchor_signal' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.2 NEXT_ANCHOR
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'NEXT_ANCHOR',
+    'structural',
+
+
+    (
+        0.28 * v.trip_importance_score +
+        0.22 * v.do_soon_score +
+        0.22 * v.next_leg_alignment_score +
+        0.18 * v.direction_alignment_score +
+        0.10 *
+        CASE
+            WHEN v.travel_time_minutes <= 25 THEN 1.00
+            WHEN v.travel_time_minutes <= 40 THEN 0.70
+            WHEN v.travel_time_minutes <= 60 THEN 0.35
+            ELSE 0.10
+        END
+    ),
+
+
+    CASE
+        WHEN (
+            0.28 * v.trip_importance_score +
+            0.22 * v.do_soon_score +
+            0.22 * v.next_leg_alignment_score +
+            0.18 * v.direction_alignment_score +
+            0.10 *
+            CASE
+                WHEN v.travel_time_minutes <= 25 THEN 1.00
+                WHEN v.travel_time_minutes <= 40 THEN 0.70
+                WHEN v.travel_time_minutes <= 60 THEN 0.35
+                ELSE 0.10
+            END
+        ) >= 0.68 THEN 1 ELSE 0
+    END,
+
+
+    0.90,
+
+
+    (
+        0.80 * (
+            0.28 * v.trip_importance_score +
+            0.22 * v.do_soon_score +
+            0.22 * v.next_leg_alignment_score +
+            0.18 * v.direction_alignment_score +
+            0.10 *
+            CASE
+                WHEN v.travel_time_minutes <= 25 THEN 1.00
+                WHEN v.travel_time_minutes <= 40 THEN 0.70
+                WHEN v.travel_time_minutes <= 60 THEN 0.35
+                ELSE 0.10
+            END
+        ) + 0.20 * 0.90
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.trip_importance_score >= 0.70 THEN 'trip_important' END,
+        CASE WHEN v.do_soon_score >= 0.65 THEN 'soon_aligned' END,
+        CASE WHEN v.next_leg_alignment_score >= 0.70 THEN 'next_leg_aligned' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.3 COMPOSITE_ANCHOR
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'COMPOSITE_ANCHOR',
+    'structural',
+
+
+    (
+        0.35 * v.composite_anchor_score +
+        0.20 * v.same_area_cluster_score +
+        0.15 * v.walkability_score +
+        0.15 * v.surrounding_density_score +
+        0.15 * v.experience_variety_score
+    ),
+
+
+    CASE WHEN (
+        0.35 * v.composite_anchor_score +
+        0.20 * v.same_area_cluster_score +
+        0.15 * v.walkability_score +
+        0.15 * v.surrounding_density_score +
+        0.15 * v.experience_variety_score
+    ) >= 0.66 THEN 1 ELSE 0 END,
+
+
+    0.84,
+
+
+    (
+        0.80 * (
+            0.35 * v.composite_anchor_score +
+            0.20 * v.same_area_cluster_score +
+            0.15 * v.walkability_score +
+            0.15 * v.surrounding_density_score +
+            0.15 * v.experience_variety_score
+        ) + 0.20 * 0.84
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.composite_anchor_score >= 0.70 THEN 'strong_composite_signal' END,
+        CASE WHEN v.same_area_cluster_score >= 0.70 THEN 'cluster_aligned' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.4 COLLECTIVE_DESTINATION
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'COLLECTIVE_DESTINATION',
+    'structural',
+
+
+    (
+        0.30 * v.collective_destination_score +
+        0.20 * v.cluster_identity_score +
+        0.20 * v.social_fit_score +
+        0.15 * v.walkability_score +
+        0.15 * v.lingerability_score
+    ),
+
+
+    CASE WHEN (
+        0.30 * v.collective_destination_score +
+        0.20 * v.cluster_identity_score +
+        0.20 * v.social_fit_score +
+        0.15 * v.walkability_score +
+        0.15 * v.lingerability_score
+    ) >= 0.66 THEN 1 ELSE 0 END,
+
+
+    0.86,
+
+
+    (
+        0.80 * (
+            0.30 * v.collective_destination_score +
+            0.20 * v.cluster_identity_score +
+            0.20 * v.social_fit_score +
+            0.15 * v.walkability_score +
+            0.15 * v.lingerability_score
+        ) + 0.20 * 0.86
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.collective_destination_score >= 0.70 THEN 'collective_pull' END,
+        CASE WHEN v.social_fit_score >= 0.70 THEN 'socially_aligned' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.5 TRIP_IMPORTANT_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'TRIP_IMPORTANT_ITEM',
+    'structural',
+
+
+    (
+        0.45 * v.trip_importance_score +
+        0.25 * v.structural_importance_score +
+        0.15 * v.rarity_score +
+        0.15 * v.destination_signature_score
+    ),
+
+
+    CASE WHEN (
+        0.45 * v.trip_importance_score +
+        0.25 * v.structural_importance_score +
+        0.15 * v.rarity_score +
+        0.15 * v.destination_signature_score
+    ) >= 0.70 THEN 1 ELSE 0 END,
+
+
+    0.58,
+
+
+    (
+        0.80 * (
+            0.45 * v.trip_importance_score +
+            0.25 * v.structural_importance_score +
+            0.15 * v.rarity_score +
+            0.15 * v.destination_signature_score
+        ) + 0.20 * 0.58
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.trip_importance_score >= 0.75 THEN 'trip_defining' END,
+        CASE WHEN v.destination_signature_score >= 0.70 THEN 'destination_signature' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+JOURNEY ROLES
+________________
+
+
+6.10.6 RECOVERY_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'RECOVERY_ITEM',
+    'journey',
+
+
+    (
+        0.28 * v.recovery_fit_score +
+        0.20 * v.fatigue_need_score +
+        0.17 * v.low_effort_access_score +
+        0.15 * v.seat_likelihood_score +
+        0.10 * v.shade_score +
+        0.10 * v.calmness_score
+    ),
+
+
+    CASE WHEN (
+        0.28 * v.recovery_fit_score +
+        0.20 * v.fatigue_need_score +
+        0.17 * v.low_effort_access_score +
+        0.15 * v.seat_likelihood_score +
+        0.10 * v.shade_score +
+        0.10 * v.calmness_score
+    ) >= 0.62 THEN 1 ELSE 0 END,
+
+
+    0.75,
+
+
+    (
+        0.80 * (
+            0.28 * v.recovery_fit_score +
+            0.20 * v.fatigue_need_score +
+            0.17 * v.low_effort_access_score +
+            0.15 * v.seat_likelihood_score +
+            0.10 * v.shade_score +
+            0.10 * v.calmness_score
+        ) + 0.20 * 0.75
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.recovery_fit_score >= 0.70 THEN 'recovery_aligned' END,
+        CASE WHEN v.fatigue_need_score >= 0.70 THEN 'fatigue_need_high' END,
+        CASE WHEN v.seat_likelihood_score >= 0.70 THEN 'likely_seating' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.7 TRANSITION_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'TRANSITION_ITEM',
+    'journey',
+
+
+    (
+        0.30 * v.transition_fit_score +
+        0.25 * v.next_leg_alignment_score +
+        0.20 *
+        CASE
+            WHEN v.detour_cost_minutes <= 5 THEN 1.00
+            WHEN v.detour_cost_minutes <= 10 THEN 0.75
+            WHEN v.detour_cost_minutes <= 15 THEN 0.45
+            ELSE 0.10
+        END +
+        0.15 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+            ELSE 0.10
+        END +
+        0.10 *
+        LEAST(
+            1.0,
+            (
+                0.40 * v.low_effort_access_score +
+                0.30 * v.open_now_score +
+                0.30 * (1 - LEAST(v.detour_cost_minutes / 20.0, 1.0))
+            )
+        )
+    ),
+
+
+    CASE WHEN (
+        0.30 * v.transition_fit_score +
+        0.25 * v.next_leg_alignment_score +
+        0.20 *
+        CASE
+            WHEN v.detour_cost_minutes <= 5 THEN 1.00
+            WHEN v.detour_cost_minutes <= 10 THEN 0.75
+            WHEN v.detour_cost_minutes <= 15 THEN 0.45
+            ELSE 0.10
+        END +
+        0.15 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+            ELSE 0.10
+        END +
+        0.10 *
+        LEAST(
+            1.0,
+            (
+                0.40 * v.low_effort_access_score +
+                0.30 * v.open_now_score +
+                0.30 * (1 - LEAST(v.detour_cost_minutes / 20.0, 1.0))
+            )
+        )
+    ) >= 0.58 THEN 1 ELSE 0 END,
+
+
+    0.55,
+
+
+    (
+        0.80 * (
+            0.30 * v.transition_fit_score +
+            0.25 * v.next_leg_alignment_score +
+            0.20 *
+            CASE
+                WHEN v.detour_cost_minutes <= 5 THEN 1.00
+                WHEN v.detour_cost_minutes <= 10 THEN 0.75
+                WHEN v.detour_cost_minutes <= 15 THEN 0.45
+                ELSE 0.10
+            END +
+            0.15 *
+            CASE
+                WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+                WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+                WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+                ELSE 0.10
+            END +
+            0.10 *
+            LEAST(
+                1.0,
+                (
+                    0.40 * v.low_effort_access_score +
+                    0.30 * v.open_now_score +
+                    0.30 * (1 - LEAST(v.detour_cost_minutes / 20.0, 1.0))
+                )
+            )
+        ) + 0.20 * 0.55
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.transition_fit_score >= 0.70 THEN 'transition_aligned' END,
+        CASE WHEN v.next_leg_alignment_score >= 0.70 THEN 'route_fits_next_leg' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.8 DISCOVERY_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'DISCOVERY_ITEM',
+    'journey',
+
+
+    (
+        0.25 * v.novelty_score +
+        0.20 * v.serendipity_score +
+        0.20 * v.local_character_score +
+        0.20 * v.discovery_fit_score +
+        0.15 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 30 AND v.is_high_commitment = 0 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 90 THEN 0.40
+            ELSE 0.15
+        END
+    ),
+
+
+    CASE WHEN (
+        0.25 * v.novelty_score +
+        0.20 * v.serendipity_score +
+        0.20 * v.local_character_score +
+        0.20 * v.discovery_fit_score +
+        0.15 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 30 AND v.is_high_commitment = 0 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 90 THEN 0.40
+            ELSE 0.15
+        END
+    ) >= 0.60 THEN 1 ELSE 0 END,
+
+
+    0.60,
+
+
+    (
+        0.80 * (
+            0.25 * v.novelty_score +
+            0.20 * v.serendipity_score +
+            0.20 * v.local_character_score +
+            0.20 * v.discovery_fit_score +
+            0.15 *
+            CASE
+                WHEN v.avg_dwell_minutes <= 30 AND v.is_high_commitment = 0 THEN 1.00
+                WHEN v.avg_dwell_minutes <= 60 THEN 0.70
+                WHEN v.avg_dwell_minutes <= 90 THEN 0.40
+                ELSE 0.15
+            END
+        ) + 0.20 * 0.60
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.novelty_score >= 0.70 THEN 'novelty_high' END,
+        CASE WHEN v.local_character_score >= 0.70 THEN 'local_character_high' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.9 SCENIC_MOMENT
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'SCENIC_MOMENT',
+    'journey',
+
+
+    (
+        0.30 * v.scenic_fit_score +
+        0.22 * v.visual_reward_score +
+        0.18 * v.photo_value_score +
+        0.15 * v.time_of_day_visual_fit +
+        0.15 * v.weather_visual_bonus
+    ),
+
+
+    CASE WHEN (
+        0.30 * v.scenic_fit_score +
+        0.22 * v.visual_reward_score +
+        0.18 * v.photo_value_score +
+        0.15 * v.time_of_day_visual_fit +
+        0.15 * v.weather_visual_bonus
+    ) >= 0.64 THEN 1 ELSE 0 END,
+
+
+    0.74,
+
+
+    (
+        0.80 * (
+            0.30 * v.scenic_fit_score +
+            0.22 * v.visual_reward_score +
+            0.18 * v.photo_value_score +
+            0.15 * v.time_of_day_visual_fit +
+            0.15 * v.weather_visual_bonus
+        ) + 0.20 * 0.74
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.scenic_fit_score >= 0.70 THEN 'scenic_fit_high' END,
+        CASE WHEN v.photo_value_score >= 0.70 THEN 'photo_value_high' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+OPPORTUNITY ROLES
+________________
+
+
+6.10.10 HERO_EXPERIENCE
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'HERO_EXPERIENCE',
+    'opportunity',
+
+
+    (
+        0.28 * v.opportunity_score +
+        0.22 * v.trip_importance_score +
+        0.20 * v.context_relevance_score +
+        0.15 * v.wow_factor_score +
+        0.15 * v.destination_signature_score
+    ),
+
+
+    CASE WHEN (
+        0.28 * v.opportunity_score +
+        0.22 * v.trip_importance_score +
+        0.20 * v.context_relevance_score +
+        0.15 * v.wow_factor_score +
+        0.15 * v.destination_signature_score
+    ) >= 0.75 THEN 1 ELSE 0 END,
+
+
+    0.95,
+
+
+    (
+        0.80 * (
+            0.28 * v.opportunity_score +
+            0.22 * v.trip_importance_score +
+            0.20 * v.context_relevance_score +
+            0.15 * v.wow_factor_score +
+            0.15 * v.destination_signature_score
+        ) + 0.20 * 0.95
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.opportunity_score >= 0.75 THEN 'high_opportunity' END,
+        CASE WHEN v.wow_factor_score >= 0.70 THEN 'high_wow' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.11 WINDOWED_EXPERIENCE
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'WINDOWED_EXPERIENCE',
+    'opportunity',
+
+
+    (
+        0.25 * v.opportunity_score +
+        0.25 * v.window_strength_score +
+        0.20 * v.time_sensitivity_score +
+        0.15 * v.reachability_before_window_end +
+        0.15 * v.window_uniqueness_score
+    ),
+
+
+    CASE WHEN (
+        0.25 * v.opportunity_score +
+        0.25 * v.window_strength_score +
+        0.20 * v.time_sensitivity_score +
+        0.15 * v.reachability_before_window_end +
+        0.15 * v.window_uniqueness_score
+    ) >= 0.70 THEN 1 ELSE 0 END,
+
+
+    1.00,
+
+
+    (
+        0.80 * (
+            0.25 * v.opportunity_score +
+            0.25 * v.window_strength_score +
+            0.20 * v.time_sensitivity_score +
+            0.15 * v.reachability_before_window_end +
+            0.15 * v.window_uniqueness_score
+        ) + 0.20 * 1.00
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.window_strength_score >= 0.70 THEN 'strong_window' END,
+        CASE WHEN v.time_sensitivity_score >= 0.70 THEN 'time_sensitive' END,
+        CASE WHEN v.reachability_before_window_end >= 0.70 THEN 'reachable_in_window' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.12 NIGHTLIFE_DRIVER
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'NIGHTLIFE_DRIVER',
+    'opportunity',
+
+
+    (
+        0.25 * v.nightlife_window_score +
+        0.25 * v.night_fit_score +
+        0.20 * v.social_fit_score +
+        0.15 * v.cluster_energy_score +
+        0.15 * v.late_open_score
+    ),
+
+
+    CASE WHEN (
+        0.25 * v.nightlife_window_score +
+        0.25 * v.night_fit_score +
+        0.20 * v.social_fit_score +
+        0.15 * v.cluster_energy_score +
+        0.15 * v.late_open_score
+    ) >= 0.66 THEN 1 ELSE 0 END,
+
+
+    0.87,
+
+
+    (
+        0.80 * (
+            0.25 * v.nightlife_window_score +
+            0.25 * v.night_fit_score +
+            0.20 * v.social_fit_score +
+            0.15 * v.cluster_energy_score +
+            0.15 * v.late_open_score
+        ) + 0.20 * 0.87
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.night_fit_score >= 0.70 THEN 'night_aligned' END,
+        CASE WHEN v.social_fit_score >= 0.70 THEN 'social_night_fit' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+SUPPORT ROLES
+________________
+
+
+6.10.13 UTILITY_SUPPORT
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'UTILITY_SUPPORT',
+    'support',
+
+
+    (
+        0.35 * v.utility_score +
+        0.25 * v.meal_fit_score +
+        0.20 * v.route_convenience_score +
+        0.20 * v.open_now_score
+    ),
+
+
+    CASE WHEN (
+        0.35 * v.utility_score +
+        0.25 * v.meal_fit_score +
+        0.20 * v.route_convenience_score +
+        0.20 * v.open_now_score
+    ) >= 0.55 THEN 1 ELSE 0 END,
+
+
+    0.40,
+
+
+    (
+        0.80 * (
+            0.35 * v.utility_score +
+            0.25 * v.meal_fit_score +
+            0.20 * v.route_convenience_score +
+            0.20 * v.open_now_score
+        ) + 0.20 * 0.40
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.utility_score >= 0.70 THEN 'utility_high' END,
+        CASE WHEN v.route_convenience_score >= 0.70 THEN 'convenient_on_route' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+In a future version, you may replace meal_fit_score here with a cleaner immediate_need_alignment_score.
+________________
+
+
+6.10.14 SOCIAL_CLUSTER_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'SOCIAL_CLUSTER_ITEM',
+    'support',
+
+
+    (
+        0.28 * v.social_fit_score +
+        0.22 * v.cluster_energy_score +
+        0.18 * v.lingerability_score +
+        0.17 * v.surrounding_density_score +
+        0.15 * v.walkability_score
+    ),
+
+
+    CASE WHEN (
+        0.28 * v.social_fit_score +
+        0.22 * v.cluster_energy_score +
+        0.18 * v.lingerability_score +
+        0.17 * v.surrounding_density_score +
+        0.15 * v.walkability_score
+    ) >= 0.60 THEN 1 ELSE 0 END,
+
+
+    0.52,
+
+
+    (
+        0.80 * (
+            0.28 * v.social_fit_score +
+            0.22 * v.cluster_energy_score +
+            0.18 * v.lingerability_score +
+            0.17 * v.surrounding_density_score +
+            0.15 * v.walkability_score
+        ) + 0.20 * 0.52
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.social_fit_score >= 0.70 THEN 'socially_aligned' END,
+        CASE WHEN v.cluster_energy_score >= 0.70 THEN 'cluster_energy_high' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+PLANNING ROLES
+________________
+
+
+6.10.15 DO_SOON_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'DO_SOON_ITEM',
+    'planning',
+
+
+    (
+        0.35 * v.do_soon_score +
+        0.25 * v.trip_importance_score +
+        0.20 * v.opening_window_future_fit +
+        0.20 * v.forward_route_fit
+    ),
+
+
+    CASE WHEN (
+        0.35 * v.do_soon_score +
+        0.25 * v.trip_importance_score +
+        0.20 * v.opening_window_future_fit +
+        0.20 * v.forward_route_fit
+    ) >= 0.62 THEN 1 ELSE 0 END,
+
+
+    0.72,
+
+
+    (
+        0.80 * (
+            0.35 * v.do_soon_score +
+            0.25 * v.trip_importance_score +
+            0.20 * v.opening_window_future_fit +
+            0.20 * v.forward_route_fit
+        ) + 0.20 * 0.72
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.do_soon_score >= 0.70 THEN 'strong_do_soon' END,
+        CASE WHEN v.forward_route_fit >= 0.70 THEN 'fits_forward_path' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.16 NEXT_DAY_CANDIDATE
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'NEXT_DAY_CANDIDATE',
+    'planning',
+
+
+    (
+        0.35 * v.next_day_score +
+        0.25 * v.trip_importance_score +
+        0.25 * (1 - v.do_now_score) +
+        0.15 *
+        CASE
+            WHEN v.do_now_score < 0.40 AND v.next_day_score > 0.70 THEN 1.00
+            ELSE 0.30
+        END
+    ),
+
+
+    CASE WHEN (
+        0.35 * v.next_day_score +
+        0.25 * v.trip_importance_score +
+        0.25 * (1 - v.do_now_score) +
+        0.15 *
+        CASE
+            WHEN v.do_now_score < 0.40 AND v.next_day_score > 0.70 THEN 1.00
+            ELSE 0.30
+        END
+    ) >= 0.60 THEN 1 ELSE 0 END,
+
+
+    0.45,
+
+
+    (
+        0.80 * (
+            0.35 * v.next_day_score +
+            0.25 * v.trip_importance_score +
+            0.25 * (1 - v.do_now_score) +
+            0.15 *
+            CASE
+                WHEN v.do_now_score < 0.40 AND v.next_day_score > 0.70 THEN 1.00
+                ELSE 0.30
+            END
+        ) + 0.20 * 0.45
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.next_day_score >= 0.70 THEN 'better_for_tomorrow' END,
+        CASE WHEN v.do_now_score < 0.40 THEN 'not_good_now' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+NEED-STATE ROLES
+________________
+
+
+6.10.17 MEAL_WINDOW_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'MEAL_WINDOW_ITEM',
+    'need_state',
+
+
+    (
+        0.30 * v.meal_fit_score +
+        0.25 * v.meal_window_score +
+        0.20 * v.hunger_need_score +
+        0.15 * v.open_now_score +
+        0.10 * v.service_window_active
+    ),
+
+
+    CASE WHEN (
+        0.30 * v.meal_fit_score +
+        0.25 * v.meal_window_score +
+        0.20 * v.hunger_need_score +
+        0.15 * v.open_now_score +
+        0.10 * v.service_window_active
+    ) >= 0.60 THEN 1 ELSE 0 END,
+
+
+    0.70,
+
+
+    (
+        0.80 * (
+            0.30 * v.meal_fit_score +
+            0.25 * v.meal_window_score +
+            0.20 * v.hunger_need_score +
+            0.15 * v.open_now_score +
+            0.10 * v.service_window_active
+        ) + 0.20 * 0.70
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.meal_window_score >= 0.70 THEN 'meal_window_open' END,
+        CASE WHEN v.hunger_need_score >= 0.70 THEN 'hunger_need_high' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.18 DINNER_DESTINATION
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'DINNER_DESTINATION',
+    'need_state',
+
+
+    (
+        0.22 * v.meal_fit_score +
+        0.22 * v.dinner_ambience_score +
+        0.20 * v.evening_fit_score +
+        0.18 * v.destination_dining_score +
+        0.18 * v.social_fit_score
+    ),
+
+
+    CASE WHEN (
+        0.22 * v.meal_fit_score +
+        0.22 * v.dinner_ambience_score +
+        0.20 * v.evening_fit_score +
+        0.18 * v.destination_dining_score +
+        0.18 * v.social_fit_score
+    ) >= 0.68 THEN 1 ELSE 0 END,
+
+
+    0.88,
+
+
+    (
+        0.80 * (
+            0.22 * v.meal_fit_score +
+            0.22 * v.dinner_ambience_score +
+            0.20 * v.evening_fit_score +
+            0.18 * v.destination_dining_score +
+            0.18 * v.social_fit_score
+        ) + 0.20 * 0.88
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.dinner_ambience_score >= 0.70 THEN 'strong_dinner_ambience' END,
+        CASE WHEN v.destination_dining_score >= 0.70 THEN 'destination_dining' END
+    )
+FROM vw_role_assignment_inputs v
+WHERE TIME(v.local_time) BETWEEN '18:00:00' AND '21:30:00';
+
+
+________________
+
+
+6.10.19 LUNCH_FIT_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'LUNCH_FIT_ITEM',
+    'need_state',
+
+
+    (
+        0.28 * v.meal_fit_score +
+        0.22 * v.lunch_window_score +
+        0.20 * v.route_alignment_score +
+        0.15 * v.quick_service_score +
+        0.15 * v.midday_proximity_score
+    ),
+
+
+    CASE WHEN (
+        0.28 * v.meal_fit_score +
+        0.22 * v.lunch_window_score +
+        0.20 * v.route_alignment_score +
+        0.15 * v.quick_service_score +
+        0.15 * v.midday_proximity_score
+    ) >= 0.62 THEN 1 ELSE 0 END,
+
+
+    0.66,
+
+
+    (
+        0.80 * (
+            0.28 * v.meal_fit_score +
+            0.22 * v.lunch_window_score +
+            0.20 * v.route_alignment_score +
+            0.15 * v.quick_service_score +
+            0.15 * v.midday_proximity_score
+        ) + 0.20 * 0.66
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.lunch_window_score >= 0.70 THEN 'lunch_window_open' END,
+        CASE WHEN v.quick_service_score >= 0.70 THEN 'quick_lunch_fit' END
+    )
+FROM vw_role_assignment_inputs v
+WHERE TIME(v.local_time) BETWEEN '11:30:00' AND '15:00:00';
+
+
+________________
+
+
+6.10.20 QUICK_BREAK_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'QUICK_BREAK_ITEM',
+    'need_state',
+
+
+    (
+        0.25 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+            ELSE 0.10
+        END +
+        0.22 * v.recovery_fit_score +
+        0.20 * v.transition_fit_score +
+        0.18 *
+        CASE
+            WHEN v.detour_cost_minutes <= 5 THEN 1.00
+            WHEN v.detour_cost_minutes <= 10 THEN 0.75
+            WHEN v.detour_cost_minutes <= 15 THEN 0.45
+            ELSE 0.10
+        END +
+        0.15 * v.impulse_stop_score
+    ),
+
+
+    CASE WHEN (
+        0.25 *
+        CASE
+            WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+            WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+            WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+            ELSE 0.10
+        END +
+        0.22 * v.recovery_fit_score +
+        0.20 * v.transition_fit_score +
+        0.18 *
+        CASE
+            WHEN v.detour_cost_minutes <= 5 THEN 1.00
+            WHEN v.detour_cost_minutes <= 10 THEN 0.75
+            WHEN v.detour_cost_minutes <= 15 THEN 0.45
+            ELSE 0.10
+        END +
+        0.15 * v.impulse_stop_score
+    ) >= 0.57 THEN 1 ELSE 0 END,
+
+
+    0.50,
+
+
+    (
+        0.80 * (
+            0.25 *
+            CASE
+                WHEN v.avg_dwell_minutes <= 20 THEN 1.00
+                WHEN v.avg_dwell_minutes <= 40 THEN 0.70
+                WHEN v.avg_dwell_minutes <= 60 THEN 0.40
+                ELSE 0.10
+            END +
+            0.22 * v.recovery_fit_score +
+            0.20 * v.transition_fit_score +
+            0.18 *
+            CASE
+                WHEN v.detour_cost_minutes <= 5 THEN 1.00
+                WHEN v.detour_cost_minutes <= 10 THEN 0.75
+                WHEN v.detour_cost_minutes <= 15 THEN 0.45
+                ELSE 0.10
+            END +
+            0.15 * v.impulse_stop_score
+        ) + 0.20 * 0.50
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.impulse_stop_score >= 0.70 THEN 'impulse_stop' END,
+        CASE WHEN v.recovery_fit_score >= 0.65 THEN 'micro_recovery_fit' END
+    )
+FROM vw_role_assignment_inputs v;
+
+
+________________
+
+
+6.10.21 LATE_NIGHT_FOOD_ITEM
+INSERT INTO trip_item_role_scores (...)
+SELECT
+    v.session_id, v.trip_id, v.user_id, v.candidate_item_id,
+    'LATE_NIGHT_FOOD_ITEM',
+    'need_state',
+
+
+    (
+        0.25 * v.late_open_score +
+        0.25 * v.meal_fit_score +
+        0.20 * v.night_fit_score +
+        0.15 * v.post_activity_recovery_fit +
+        0.15 * v.short_distance_score
+    ),
+
+
+    CASE WHEN (
+        0.25 * v.late_open_score +
+        0.25 * v.meal_fit_score +
+        0.20 * v.night_fit_score +
+        0.15 * v.post_activity_recovery_fit +
+        0.15 * v.short_distance_score
+    ) >= 0.62 THEN 1 ELSE 0 END,
+
+
+    0.73,
+
+
+    (
+        0.80 * (
+            0.25 * v.late_open_score +
+            0.25 * v.meal_fit_score +
+            0.20 * v.night_fit_score +
+            0.15 * v.post_activity_recovery_fit +
+            0.15 * v.short_distance_score
+        ) + 0.20 * 0.73
+    ),
+
+
+    JSON_ARRAY(
+        CASE WHEN v.late_open_score >= 0.70 THEN 'open_late' END,
+        CASE WHEN v.night_fit_score >= 0.70 THEN 'night_food_fit' END
+    )
+FROM vw_role_assignment_inputs v
+WHERE TIME(v.local_time) >= '21:30:00';
+
+
+________________
+
+
+6.11 Final Role Resolution Query
+Now resolve the primary and secondary roles.
+________________
+
+
+Step A — rank eligible roles per item
+WITH ranked_roles AS (
+    SELECT
+        r.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.session_id, r.trip_id, r.user_id, r.candidate_item_id
+            ORDER BY r.role_selection_score DESC, r.role_score DESC
+        ) AS rn
+    FROM trip_item_role_scores r
+    WHERE r.eligible_flag = 1
+)
+SELECT * FROM ranked_roles;
+
+
+________________
+
+
+Step B — build final output table
+INSERT INTO trip_item_roles (
+    session_id,
+    trip_id,
+    user_id,
+    candidate_item_id,
+    candidate_item_type,
+    assigned_roles,
+    primary_role,
+    secondary_roles,
+    role_group,
+    role_confidence,
+    primary_role_score,
+    second_best_role_score,
+    role_priority,
+    role_selection_score,
+    role_reason_codes
+)
+WITH ranked_roles AS (
+    SELECT
+        r.*,
+        i.candidate_item_type,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.session_id, r.trip_id, r.user_id, r.candidate_item_id
+            ORDER BY r.role_selection_score DESC, r.role_score DESC
+        ) AS rn
+    FROM trip_item_role_scores r
+    JOIN vw_role_assignment_inputs i
+      ON i.session_id = r.session_id
+     AND i.trip_id = r.trip_id
+     AND i.user_id = r.user_id
+     AND i.candidate_item_id = r.candidate_item_id
+    WHERE r.eligible_flag = 1
+),
+role_summary AS (
+    SELECT
+        session_id,
+        trip_id,
+        user_id,
+        candidate_item_id,
+        MAX(candidate_item_type) AS candidate_item_type,
+
+
+        JSON_ARRAYAGG(role_name) AS assigned_roles,
+
+
+        MAX(CASE WHEN rn = 1 THEN role_name END) AS primary_role,
+        JSON_ARRAYAGG(CASE WHEN rn > 1 THEN role_name END) AS secondary_roles,
+        MAX(CASE WHEN rn = 1 THEN role_group END) AS role_group,
+
+
+        MAX(CASE WHEN rn = 1 THEN role_score END) AS primary_role_score,
+        MAX(CASE WHEN rn = 2 THEN role_score END) AS second_best_role_score,
+        MAX(CASE WHEN rn = 1 THEN role_priority_weight END) AS role_priority,
+        MAX(CASE WHEN rn = 1 THEN role_selection_score END) AS role_selection_score,
+        MAX(CASE WHEN rn = 1 THEN reason_codes_json END) AS role_reason_codes
+
+
+    FROM ranked_roles
+    GROUP BY session_id, trip_id, user_id, candidate_item_id
+)
+SELECT
+    session_id,
+    trip_id,
+    user_id,
+    candidate_item_id,
+    candidate_item_type,
+    assigned_roles,
+    primary_role,
+    secondary_roles,
+    role_group,
+
+
+    LEAST(
+        1.0,
+        (
+            0.50 * primary_role_score +
+            0.20 * GREATEST(0, primary_role_score - COALESCE(second_best_role_score, 0)) +
+            0.15 * 0.85 +
+            0.15 * 0.85
+        )
+    ) AS role_confidence,
+
+
+    primary_role_score,
+    second_best_role_score,
+    role_priority,
+    role_selection_score,
+    role_reason_codes
+
+
+FROM role_summary;
+
+
+________________
+
+
+6.12 Better role_confidence Formula (Recommended)
+The query above uses placeholders for the last two terms.
+For production, use:
+role_confidence =
+0.50 * normalized_primary_role_score
++ 0.20 * score_gap_vs_second_best
++ 0.15 * signal_coverage_score
++ 0.15 * context_alignment_stability
+
+
+________________
+
+
+Suggested SQL Version
+LEAST(
+    1.0,
+    (
+        0.50 * primary_role_score +
+        0.20 * GREATEST(0, primary_role_score - COALESCE(second_best_role_score, 0)) +
+        0.15 * signal_coverage_score +
+        0.15 * context_alignment_stability
+    )
+)
+
+
+Where:
+signal_coverage_score
+Can be precomputed in your input view.
+context_alignment_stability
+Can be approximated as:
+CASE
+    WHEN primary_role IN ('WINDOWED_EXPERIENCE') AND reachability_before_window_end < 0.50 THEN 0.45
+    WHEN primary_role IN ('DINNER_DESTINATION','LUNCH_FIT_ITEM','MEAL_WINDOW_ITEM') THEN 0.80
+    WHEN primary_role IN ('CURRENT_ANCHOR','NEXT_ANCHOR') THEN 0.85
+    ELSE 0.75
+END
+
+
+________________
+
+
+6.13 Strongly Recommended Conflict Rules
+This is important.
+Some roles should suppress or downgrade others.
+Without this, your output will be noisy.
+________________
+
+
+Rule 1 — DINNER_DESTINATION suppresses MEAL_WINDOW_ITEM
+If both eligible:
+* keep both in assigned_roles
+* but DINNER_DESTINATION should usually win as primary
+This is already handled via higher role_priority_weight.
+________________
+
+
+Rule 2 — WINDOWED_EXPERIENCE can override CURRENT_ANCHOR
+If:
+window_strength_score >= 0.80
+AND time_sensitivity_score >= 0.75
+AND reachability_before_window_end >= 0.65
+
+
+Then WINDOWED_EXPERIENCE should win unless CURRENT_ANCHOR is extremely dominant.
+________________
+
+
+Rule 3 — NEXT_DAY_CANDIDATE should never be primary if strong “now” roles exist
+You can enforce this by excluding it if item also has:
+* CURRENT_ANCHOR
+* NEXT_ANCHOR
+* WINDOWED_EXPERIENCE
+* MEAL_WINDOW_ITEM
+* DINNER_DESTINATION
+* RECOVERY_ITEM
+________________
+
+
+Rule 4 — UTILITY_SUPPORT should rarely be primary
+Keep it available for downstream balancing, but it should almost never dominate unless user state is utility-heavy.
+________________
+
+
+6.14 Recommended Post-Processing Rules
+After trip_item_roles is built, run a small cleanup layer.
+________________
+
+
+Example Post-Processing SQL
+Remove weak secondary roles
+DELETE FROM trip_item_role_scores
+WHERE eligible_flag = 1
+  AND role_score < 0.62
+  AND role_name IN ('UTILITY_SUPPORT', 'TRANSITION_ITEM', 'SOCIAL_CLUSTER_ITEM');
+
+
+________________
+
+
+Optional: max secondary roles = 3
+This keeps the output cleaner.
+You can keep:
+* top 3 non-primary eligible roles only
+________________
+
+
+6.15 Suggested Laravel / Pipeline Order
+Recommended execution order:
+________________
+
+
+Role Assignment Pipeline
+Step 1
+Populate / refresh:
+trip_feed_candidates
+
+
+Step 2
+Ensure upstream modules already populated:
+* trip_item_structural_scores
+* trip_item_opportunity_scores
+* trip_item_action_horizon_scores
+* trip_item_context_scores
+* trip_session_state
+Step 3
+Build / refresh:
+vw_role_assignment_inputs
+
+
+Step 4
+Clear old role rows for this session
+DELETE FROM trip_item_role_scores
+WHERE session_id = ? AND trip_id = ? AND user_id = ?;
+
+
+Step 5
+Run all role INSERT queries
+Step 6
+Clear previous final outputs
+DELETE FROM trip_item_roles
+WHERE session_id = ? AND trip_id = ? AND user_id = ?;
+
+
+Step 7
+Run final role resolution query
+Step 8
+Pass trip_item_roles to the feed ranking / feed composition module
+________________
+
+
+6.16 Recommended Indexes
+For performance, add these if your tables grow large.
+________________
+
+
+On upstream score tables
+INDEX idx_session_trip_user_item (session_id, trip_id, user_id, candidate_item_id)
+
+
+Apply this to:
+* trip_item_structural_scores
+* trip_item_opportunity_scores
+* trip_item_action_horizon_scores
+* trip_item_context_scores
+________________
+
+
+On trip_feed_candidates
+INDEX idx_feed_candidates (session_id, trip_id, user_id, candidate_item_id)
+
+
+________________
+
+
+On trip_item_role_scores
+Already included, but especially important:
+INDEX idx_role_session (session_id, trip_id, user_id)
+INDEX idx_role_item (candidate_item_id)
+INDEX idx_role_eligible (eligible_flag)
+
+
+________________
+
+
+6.17 What This Module Gives You Downstream
+This is where the real product power starts.
+Once trip_item_roles exists, your feed ranking module can do things like:
+* ensure the top 5 feed has:
+   * 1 main anchor
+   * 1 meal-fit or recovery item
+   * 1 scenic / emotional item
+   * 1 practical / flow item
+   * 1 future save
+* avoid bad feed patterns like:
+   * 5 museums in a row
+   * 4 dinner places at noon
+   * 3 structurally important but low-moment-fit items
+That is the difference between:
+“Top places nearby”
+and
+“A smart, trip-aware, human-timed feed.”
+That is the real system value.
+________________
+
+
+6.18 Final Recommended Production Output
+Your final output contract should be:
+session_id
+trip_id
+user_id
+candidate_item_id
+candidate_item_type
+
+
+assigned_roles
+primary_role
+secondary_roles
+role_group
+
+
+role_confidence
+primary_role_score
+second_best_role_score
+role_priority
+role_selection_score
+
+
+role_reason_codes
+evaluated_at
+
+
+That is a strong, scalable production shape.

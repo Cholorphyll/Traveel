@@ -1,0 +1,1721 @@
+﻿ENTITY FOUNDATION LAYER — FINAL IMPLEMENTATION SPEC
+________________
+
+
+1) What this layer is
+Purpose
+Create one unified, normalized entity record for every item that can appear in the feed.
+Examples:
+* Eiffel Tower → anchor_attraction
+* Louvre → anchor_attraction
+* Seine cruise → experience
+* sunset rooftop bar → food
+* funicular / ferry / tram shortcut → enabler
+* jazz night tonight → event
+* hidden square near cathedral → context_attraction
+This layer should answer:
+* What is this thing?
+* How important is it generally?
+* How demanding is it?
+* When is it usable?
+* What physical / weather / comfort properties does it have?
+* Is it the kind of thing the feed can structurally use?
+It should not answer:
+* Is it useful right now for this user? → later modules
+* Is it a good next item in the route? → later modules
+* Is it winning this slot today? → later modules
+________________
+
+
+2) Core design principle
+Every entity gets:
+A) Raw fields
+Directly stored facts
+B) Derived normalized fields
+Computed, standardized signals used by ranking and orchestration
+C) Confidence / sourceability where needed
+Because many tourism entities will have incomplete data
+________________
+
+
+3) Recommended table structure
+You should maintain this as one canonical table:
+CREATE TABLE feed_entities (
+    item_id BIGINT PRIMARY KEY,
+    item_type VARCHAR(50) NOT NULL,
+
+
+    -- Identity / taxonomy
+    anchor_attraction BOOLEAN DEFAULT 0,
+    context_attraction BOOLEAN DEFAULT 0,
+    experience BOOLEAN DEFAULT 0,
+    food BOOLEAN DEFAULT 0,
+    enabler BOOLEAN DEFAULT 0,
+    event BOOLEAN DEFAULT 0,
+
+
+    -- Quality / popularity
+    popularity_score DECIMAL(6,2),
+    review_count INT,
+    rating DECIMAL(3,2),
+    editorial_priority DECIMAL(5,2),
+
+
+    -- Operational
+    opening_hours_json JSON,
+    duration_min INT,
+    seasonality_json JSON,
+    booking_required BOOLEAN,
+    advance_commitment_level VARCHAR(20),
+
+
+    -- Activity
+    activity_energy VARCHAR(20),
+    activity_type_json JSON,
+
+
+    -- Spatial
+    lat DECIMAL(10,7),
+    lng DECIMAL(10,7),
+    area_id BIGINT,
+    walkability_score DECIMAL(5,2),
+
+
+    -- Feed behavior
+    clusterable BOOLEAN,
+    hero_potential BOOLEAN,
+    night_compatible BOOLEAN,
+    family_friendly BOOLEAN,
+    rain_friendly BOOLEAN,
+
+
+    -- Comfort / exposure
+    sun_exposure VARCHAR(20),
+    rain_exposure VARCHAR(20),
+    wind_exposure VARCHAR(20),
+    requires_good_visibility BOOLEAN,
+    benefits_from_clear_sky BOOLEAN,
+    best_in_heat BOOLEAN,
+    best_in_cool_evening BOOLEAN,
+
+
+    -- Useful implementation extras
+    data_confidence_score DECIMAL(5,2),
+    last_foundation_refresh_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME
+);
+
+
+________________
+
+
+4) Strong recommendation: use supporting tables too
+Do not force everything into one table only. Keep feed_entities as the serving layer, but populate from source/feature tables.
+Recommended support tables:
+feed_entity_sources
+feed_entity_hours
+feed_entity_tags
+feed_entity_weather_traits
+feed_entity_popularity_features
+feed_entity_duration_features
+feed_entity_area_mapping
+feed_entity_behavior_flags
+
+
+Then materialize into feed_entities.
+That gives you maintainability without making serving expensive.
+________________
+
+
+5) FIELD-BY-FIELD FINAL SPEC
+________________
+
+
+A. IDENTITY / TAXONOMY
+These are the most important fields in the whole layer because they control what later modules are allowed to do.
+________________
+
+
+5.1 item_id
+Purpose
+Unique stable identifier for the entity.
+Rules
+Must be globally unique across all feedable types.
+Best practice
+Use a canonical ID namespace.
+Example:
+1000001 = Sight
+2000001 = Experience
+3000001 = Restaurant
+4000001 = Enabler
+5000001 = Event
+
+
+Or better:
+entity_uid = CONCAT(source_type, ':', source_id)
+
+
+But if feed needs integer performance, create numeric canonical IDs.
+________________
+
+
+5.2 item_type
+Purpose
+Primary type of the entity.
+Allowed values
+Recommended final set:
+anchor_attraction
+context_attraction
+experience
+food
+enabler
+event
+
+
+This is the main type, even if the item has multiple roles.
+Example:
+* Museum café with rooftop? still maybe food
+* Cathedral tower climb? maybe experience
+* Main cathedral itself? anchor_attraction
+Population logic
+Map from your source tables.
+Example:
+CASE
+    WHEN source_table = 'Sight' AND attraction_tier = 'anchor' THEN 'anchor_attraction'
+    WHEN source_table = 'Sight' AND attraction_tier = 'context' THEN 'context_attraction'
+    WHEN source_table = 'Experience' THEN 'experience'
+    WHEN source_table = 'Restaurant' THEN 'food'
+    WHEN source_table = 'TransitEnabler' THEN 'enabler'
+    WHEN source_table = 'Event' THEN 'event'
+END
+
+
+________________
+
+
+5.3 Role booleans
+You listed:
+* anchor_attraction
+* context_attraction
+* experience
+* food
+* enabler
+* event
+Purpose
+These are capability flags, not just taxonomy.
+An entity can theoretically belong to multiple families.
+Example:
+* Night market = food = 1, experience = 1, maybe event = 1
+* River cruise dinner = food = 1, experience = 1
+* Landmark viewpoint = anchor_attraction = 1, maybe night_compatible = 1
+Best practice
+Keep both:
+* item_type = primary family
+* family booleans = multi-membership support
+Population logic
+Use category mappings.
+Example mapping table:
+CREATE TABLE entity_type_mapping (
+    source_category VARCHAR(100),
+    anchor_attraction BOOLEAN,
+    context_attraction BOOLEAN,
+    experience BOOLEAN,
+    food BOOLEAN,
+    enabler BOOLEAN,
+    event BOOLEAN
+);
+
+
+Then populate:
+UPDATE feed_entities fe
+JOIN source_items s ON fe.item_id = s.item_id
+JOIN entity_type_mapping etm ON s.category = etm.source_category
+SET
+    fe.anchor_attraction = etm.anchor_attraction,
+    fe.context_attraction = etm.context_attraction,
+    fe.experience = etm.experience,
+    fe.food = etm.food,
+    fe.enabler = etm.enabler,
+    fe.event = etm.event;
+
+
+________________
+
+
+B. POPULARITY / QUALITY
+These are global importance signals.
+They should not be too session-sensitive.
+________________
+
+
+5.4 review_count
+Purpose
+Measures public proof / confidence / broad relevance.
+Raw source
+Usually from:
+* Tripadvisor / Google / OTA / Yelp / source review counts
+Population logic
+Use best available source.
+review_count = COALESCE(tripadvisor_reviews, google_reviews, source_reviews, 0)
+
+
+Example:
+UPDATE feed_entities fe
+JOIN source_items s ON fe.item_id = s.item_id
+SET fe.review_count = GREATEST(
+    COALESCE(s.ta_review_count, 0),
+    COALESCE(s.google_review_count, 0),
+    COALESCE(s.source_review_count, 0)
+);
+
+
+Notes
+Do not log-transform raw values at storage level unless you also keep raw count.
+Store raw count; compute normalized score separately.
+________________
+
+
+5.5 rating
+Purpose
+Quality perception.
+Source
+Best public rating source.
+Population logic
+rating = COALESCE(ta_rating, google_rating, source_rating)
+
+
+If multiple sources exist
+Use weighted blend only if sources are reliable:
+rating_blended =
+(ta_rating * log(1 + ta_reviews) + google_rating * log(1 + google_reviews))
+/
+(log(1 + ta_reviews) + log(1 + google_reviews))
+
+
+SQL example
+UPDATE feed_entities fe
+JOIN source_items s ON fe.item_id = s.item_id
+SET fe.rating =
+CASE
+    WHEN COALESCE(s.ta_review_count,0) > 0 AND COALESCE(s.google_review_count,0) > 0 THEN
+        (
+            (s.ta_rating * LN(1 + s.ta_review_count)) +
+            (s.google_rating * LN(1 + s.google_review_count))
+        ) /
+        NULLIF(LN(1 + s.ta_review_count) + LN(1 + s.google_review_count), 0)
+    ELSE COALESCE(s.ta_rating, s.google_rating, s.source_rating)
+END;
+
+
+________________
+
+
+5.6 editorial_priority
+Purpose
+Human override / curation / strategic boost.
+This is crucial. Pure data ranking is not enough in travel.
+Use it to boost:
+* iconic places
+* photogenic places
+* culturally essential stops
+* “must not miss” places
+* platform priorities
+* monetizable but still quality experiences (carefully)
+Scale
+Use 0–100
+Recommended definition
+0–20   = low editorial value
+21–50  = normal
+51–75  = important
+76–90  = highly important
+91–100 = iconic / flagship / feed-defining
+
+
+Population sources
+Can come from:
+* manual editor table
+* “must-see” labels
+* homepage featured lists
+* destination guides
+* SEO importance
+* clickthrough performance
+Example source table
+CREATE TABLE editorial_entity_priority (
+    item_id BIGINT PRIMARY KEY,
+    editorial_priority DECIMAL(5,2),
+    notes TEXT
+);
+
+
+Populate
+UPDATE feed_entities fe
+LEFT JOIN editorial_entity_priority ep ON fe.item_id = ep.item_id
+SET fe.editorial_priority = COALESCE(ep.editorial_priority, 40);
+
+
+Strong recommendation
+Never leave this NULL. Default to 40.
+________________
+
+
+5.7 popularity_score
+This is one of the most important fields.
+Purpose
+A single normalized importance score for “how broadly relevant / proven / prominent is this entity”.
+Do NOT set this manually from one source
+It should be computed.
+________________
+
+
+FINAL RECOMMENDED FORMULA FOR popularity_score
+Use a 0–100 scale.
+Inputs
+* review_count
+* rating
+* editorial_priority
+* optional: click volume / saves / search demand / image count / mention frequency
+Recommended production-safe formula
+popularity_score =
+(
+    0.45 * review_strength +
+    0.25 * rating_strength +
+    0.20 * editorial_strength +
+    0.10 * demand_strength
+)
+
+
+Where:
+________________
+
+
+A) review_strength (0–100)
+Use logarithmic normalization:
+review_strength =
+LEAST(100, 100 * LN(1 + review_count) / LN(1 + city_p95_review_count))
+
+
+Why:
+* prevents giant landmarks from overpowering everything
+* makes 5,000 vs 50,000 less absurdly different
+If no city-specific denominator available, use global per type.
+________________
+
+
+B) rating_strength (0–100)
+Travel ratings are often compressed between 3.5 and 5.0, so use stretched normalization:
+rating_strength =
+CASE
+  WHEN rating IS NULL THEN 50
+  ELSE LEAST(100, GREATEST(0, ((rating - 3.5) / 1.5) * 100))
+END
+
+
+This means:
+* 3.5 = 0
+* 5.0 = 100
+You can also cap lower at 4.0 if your content is already quality-filtered.
+________________
+
+
+C) editorial_strength
+editorial_strength = editorial_priority
+
+
+Already 0–100.
+________________
+
+
+D) demand_strength (optional but recommended)
+Use if you have:
+* pageviews
+* saves
+* clicks
+* search impressions
+* itinerary insertions
+Example:
+demand_strength =
+LEAST(100, 100 * LN(1 + item_90d_engagement) / LN(1 + city_p95_engagement))
+
+
+If unavailable:
+demand_strength = 50
+
+
+________________
+
+
+Final SQL example
+UPDATE feed_entities fe
+JOIN city_popularity_baselines cb 
+  ON fe.area_id = cb.area_id AND fe.item_type = cb.item_type
+SET fe.popularity_score =
+ROUND(
+    (
+        0.45 * LEAST(100, 100 * LN(1 + COALESCE(fe.review_count,0)) / NULLIF(LN(1 + cb.p95_review_count),0)) +
+        0.25 * CASE
+                  WHEN fe.rating IS NULL THEN 50
+                  ELSE LEAST(100, GREATEST(0, ((fe.rating - 3.5) / 1.5) * 100))
+               END +
+        0.20 * COALESCE(fe.editorial_priority,40) +
+        0.10 * COALESCE(fe.demand_score_90d,50)
+    ),
+2
+);
+
+
+If you don’t have demand_score_90d, replace with 50.
+Why this works
+It combines:
+* social proof
+* quality
+* editorial truth
+* market/user demand
+That is much better than just “review_count”.
+Research on POI recommendation consistently treats popularity, ratings, reviews, and contextual signals as core inputs for ranking and recommendation quality. (PMC)
+________________
+
+
+C. OPERATIONAL METADATA
+These fields determine whether an entity is realistically usable in a tourist day.
+________________
+
+
+5.8 opening_hours
+Purpose
+Defines when entity is operational.
+Best storage format
+Store as structured JSON, not raw text.
+Recommended JSON shape
+{
+  "mon": [{"open": "09:00", "close": "18:00"}],
+  "tue": [{"open": "09:00", "close": "18":00"}],
+  "wed": [{"open": "09:00", "close": "18:00"}],
+  "thu": [{"open": "09:00", "close": "18:00"}],
+  "fri": [{"open": "09:00", "close": "20:00"}],
+  "sat": [{"open": "09:00", "close": "20:00"}],
+  "sun": [{"open": "10:00", "close": "17:00"}]
+}
+
+
+Why JSON
+Because later modules need:
+* open now?
+* opens soon?
+* closes soon?
+* available in slot?
+* suitable for late evening?
+Source
+Official website / Google / source table / schema markup.
+Schema.org and related tourism/POI data models explicitly support structured opening hours and geo-linked POI attributes, which aligns well with using structured operational fields rather than raw text. (schema.org)
+Population strategy
+If you only have text now:
+"Mon-Sun 9AM–6PM"
+
+
+Then parse into JSON via ETL.
+SQL recommendation
+Store parsed JSON in foundation table, not parsing at runtime.
+________________
+
+
+5.9 duration_min
+Purpose
+Estimated total realistic tourist time cost.
+This is hugely important for feed intelligence.
+It should represent:
+“If this appears in the feed, how much of the day does it consume?”
+Not just time physically inside.
+Include
+* visit time
+* queue/friction if typical
+* average linger behavior if relevant
+Exclude
+* full travel time from arbitrary user location (that belongs later)
+________________
+
+
+FINAL DURATION MODEL
+Recommended duration components
+duration_min =
+base_visit_duration
++ queue_buffer
++ transition_buffer
+
+
+Where:
+________________
+
+
+A) base_visit_duration
+Derived by category / source / observed behavior.
+Suggested defaults:
+Category
+	Base duration
+	landmark exterior
+	20–35 min
+	viewpoint
+	20–40 min
+	square / plaza
+	15–30 min
+	church / temple
+	20–45 min
+	museum small
+	45–75 min
+	museum major
+	90–180 min
+	gallery
+	45–90 min
+	park stroll
+	30–90 min
+	market
+	45–120 min
+	beach stop
+	45–180 min
+	restaurant quick
+	45–60 min
+	restaurant sit-down
+	75–120 min
+	coffee stop
+	20–40 min
+	rooftop bar
+	60–120 min
+	cruise
+	60–180 min
+	guided experience
+	90–240 min
+	transport enabler
+	10–25 min
+	________________
+
+
+B) queue_buffer
+Use if entity has heavy tourism friction.
+queue_buffer =
+CASE
+  WHEN review_count > 10000 AND anchor_attraction = 1 THEN 20
+  WHEN review_count > 5000  AND anchor_attraction = 1 THEN 10
+  ELSE 0
+END
+
+
+Can later be improved using live wait-time proxies.
+________________
+
+
+C) transition_buffer
+Micro overhead for entering / settling / ticketing.
+transition_buffer =
+CASE
+  WHEN booking_required = 1 THEN 10
+  WHEN experience = 1 THEN 10
+  WHEN food = 1 THEN 5
+  ELSE 5
+END
+
+
+________________
+
+
+SQL example
+UPDATE feed_entities
+SET duration_min =
+    COALESCE(source_duration_min,
+        CASE
+            WHEN item_type = 'anchor_attraction' AND category = 'major_museum' THEN 120
+            WHEN item_type = 'anchor_attraction' AND category = 'viewpoint' THEN 30
+            WHEN item_type = 'context_attraction' THEN 25
+            WHEN item_type = 'experience' THEN 120
+            WHEN item_type = 'food' AND subcategory = 'coffee' THEN 30
+            WHEN item_type = 'food' AND subcategory = 'restaurant' THEN 90
+            WHEN item_type = 'enabler' THEN 15
+            WHEN item_type = 'event' THEN 120
+            ELSE 45
+        END
+    )
+    +
+    CASE
+        WHEN review_count > 10000 AND anchor_attraction = 1 THEN 20
+        WHEN review_count > 5000 AND anchor_attraction = 1 THEN 10
+        ELSE 0
+    END
+    +
+    CASE
+        WHEN booking_required = 1 THEN 10
+        WHEN experience = 1 THEN 10
+        ELSE 5
+    END;
+
+
+________________
+
+
+5.10 seasonality
+Purpose
+Defines when the entity is naturally better / worse / relevant.
+Best storage
+JSON, not a single label.
+Recommended JSON shape
+{
+  "best_months": [4,5,6,9,10],
+  "okay_months": [3,7,8,11],
+  "poor_months": [12,1,2],
+  "seasonal_only": false
+}
+
+
+Use cases
+This powers:
+* “this is great right now”
+* avoid off-season dead zones
+* terrace / beach / garden / ski / seasonal event logic
+How to populate
+Use layered logic:
+Source priority:
+1. explicit operational source
+2. category heuristics
+3. climate-zone mapping
+4. editorial override
+Example heuristics
+Entity type
+	Best months
+	rooftop bar
+	spring / autumn / summer evenings
+	beach
+	warm months
+	botanical garden
+	bloom months
+	outdoor market
+	non-rainy / mild months
+	indoor museum
+	all months
+	ski experience
+	winter only
+	SQL example
+UPDATE feed_entities
+SET seasonality_json =
+CASE
+    WHEN item_type = 'anchor_attraction' AND category IN ('museum','gallery') THEN
+        JSON_OBJECT(
+            'best_months', JSON_ARRAY(1,2,3,4,5,6,7,8,9,10,11,12),
+            'okay_months', JSON_ARRAY(),
+            'poor_months', JSON_ARRAY(),
+            'seasonal_only', FALSE
+        )
+    WHEN item_type = 'food' AND subcategory = 'rooftop_bar' THEN
+        JSON_OBJECT(
+            'best_months', JSON_ARRAY(3,4,5,9,10,11),
+            'okay_months', JSON_ARRAY(2,6,7,8),
+            'poor_months', JSON_ARRAY(12,1),
+            'seasonal_only', FALSE
+        )
+    ELSE NULL
+END;
+
+
+________________
+
+
+5.11 booking_required
+Purpose
+Can the user realistically do this spontaneously?
+Values
+Boolean
+Populate
+Use source flags / booking partner presence / entity type.
+Heuristic defaults
+UPDATE feed_entities
+SET booking_required =
+CASE
+    WHEN item_type = 'experience' THEN 1
+    WHEN item_type = 'event' THEN 1
+    WHEN category IN ('fine_dining', 'guided_tour', 'show', 'boat_tour') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.12 advance_commitment_level
+Purpose
+Measures how much planning commitment this item demands.
+This is much better than booking_required alone.
+Allowed values
+none
+light
+moderate
+high
+locked
+
+
+Meaning
+Value
+	Meaning
+	none
+	can do instantly
+	light
+	minor effort / maybe queue
+	moderate
+	advisable to plan
+	high
+	needs reservation / timing
+	locked
+	fixed schedule / ticket / time slot
+	Population logic
+UPDATE feed_entities
+SET advance_commitment_level =
+CASE
+    WHEN item_type = 'event' THEN 'locked'
+    WHEN booking_required = 1 AND category IN ('show','ticketed_tour') THEN 'locked'
+    WHEN booking_required = 1 THEN 'high'
+    WHEN anchor_attraction = 1 AND review_count > 10000 THEN 'moderate'
+    WHEN food = 1 AND subcategory IN ('fine_dining','popular_brunch') THEN 'moderate'
+    ELSE 'none'
+END;
+
+
+________________
+
+
+D. ACTIVITY METADATA
+This controls journey fatigue, energy rhythm, and sequencing.
+________________
+
+
+5.13 activity_energy
+Purpose
+How physically / mentally demanding is this item?
+Allowed values
+low
+medium
+high
+exhausting
+
+
+Final interpretation
+Value
+	Meaning
+	low
+	easy, restorative, low effort
+	medium
+	normal tourist effort
+	high
+	meaningfully effortful
+	exhausting
+	likely to drain the day
+	Populate using weighted heuristics
+Use:
+* walking demand
+* stairs / elevation
+* standing time
+* heat exposure
+* duration
+* activity type
+________________
+
+
+FINAL ENERGY SCORING MODEL
+Build a numeric score first
+energy_points =
+duration_points
++ terrain_points
++ standing_points
++ exposure_points
++ exertion_points
+
+
+Suggested rules
+duration_points
+0 if duration < 30
+1 if 30–60
+2 if 61–120
+3 if >120
+
+
+terrain_points
+0 flat / indoor
+1 moderate walking
+2 hilly / lots of walking / stairs
+3 hike / steep climb
+
+
+standing_points
+0 seated / casual
+1 moderate standing
+2 long standing / queue-heavy
+
+
+exposure_points
+0 climate-protected
+1 outdoor mild
+2 exposed outdoor
+
+
+exertion_points
+0 passive
+1 active
+2 physically demanding
+3 strenuous
+
+
+Final mapping
+0–2  => low
+3–5  => medium
+6–8  => high
+9+   => exhausting
+
+
+SQL approximation
+UPDATE feed_entities
+SET activity_energy =
+CASE
+    WHEN
+        (
+            CASE
+                WHEN duration_min < 30 THEN 0
+                WHEN duration_min <= 60 THEN 1
+                WHEN duration_min <= 120 THEN 2
+                ELSE 3
+            END
+            +
+            CASE
+                WHEN category IN ('museum','cafe','gallery','boat_cruise') THEN 0
+                WHEN category IN ('park','market','old_town_walk') THEN 1
+                WHEN category IN ('hill_viewpoint','tower_climb','large_site') THEN 2
+                WHEN category IN ('hike','mountain_walk') THEN 3
+                ELSE 1
+            END
+            +
+            CASE
+                WHEN category IN ('restaurant','cruise','cinema') THEN 0
+                WHEN category IN ('museum','gallery') THEN 1
+                WHEN category IN ('queue_heavy_landmark','festival') THEN 2
+                ELSE 1
+            END
+        ) >= 9 THEN 'exhausting'
+    WHEN (...) >= 6 THEN 'high'
+    WHEN (...) >= 3 THEN 'medium'
+    ELSE 'low'
+END;
+
+
+If you want, I can later convert this into a cleaner computed feature pipeline instead of repeated CASEs.
+________________
+
+
+5.14 activity_type
+Purpose
+Describes movement / environmental mode.
+Your proposed values
+* walk
+* indoor
+* outdoor
+* active
+* passive
+That’s good, but single-valued is too limiting.
+Final recommendation
+Store as multi-tag JSON array
+["outdoor", "walk", "passive"]
+
+
+Possible tags:
+walk
+indoor
+outdoor
+active
+passive
+seated
+scenic
+cultural
+social
+water
+elevated
+family
+romantic
+
+
+Why
+A museum can be:
+* indoor
+* walk
+* passive
+* cultural
+A rooftop bar can be:
+* outdoor
+* seated
+* social
+* scenic
+Populate via mapping table
+CREATE TABLE activity_type_mapping (
+    category VARCHAR(100),
+    activity_type_json JSON
+);
+
+
+Then:
+UPDATE feed_entities fe
+JOIN activity_type_mapping atm ON fe.category = atm.category
+SET fe.activity_type_json = atm.activity_type_json;
+
+
+________________
+
+
+E. SPATIAL METADATA
+This makes the feed geographically intelligent.
+________________
+
+
+5.15 lat, lng
+Purpose
+Canonical coordinates.
+Populate
+From primary source.
+Rules
+Must represent the actual visitor entry / practical location if possible, not just centroid of a giant polygon.
+Example:
+* museum main entrance > better than parcel centroid
+Validation
+UPDATE feed_entities
+SET lat = NULL, lng = NULL
+WHERE lat NOT BETWEEN -90 AND 90
+   OR lng NOT BETWEEN -180 AND 180;
+
+
+________________
+
+
+5.16 area_id
+Purpose
+Critical for feed coherence.
+This should represent the practical tourist zone the entity belongs to.
+Not necessarily city admin area.
+Examples:
+* “Montmartre”
+* “Louvre / Tuileries”
+* “South Bank”
+* “Old Town”
+* “Harbourfront”
+This is one of the most important fields in your entire feed system.
+Why it matters
+Later modules use it for:
+* local continuity
+* non-zig-zag flow
+* cluster generation
+* anchor neighborhoods
+* session coherence
+How to populate
+Best method:
+Create a custom tourist area system.
+Option A (best)
+Use your own polygon zones.
+tourist_areas (
+  area_id,
+  city_id,
+  area_name,
+  polygon_geom
+)
+
+
+Then assign via spatial join:
+UPDATE feed_entities fe
+JOIN tourist_areas ta
+  ON ST_CONTAINS(ta.polygon_geom, POINT(fe.lng, fe.lat))
+SET fe.area_id = ta.area_id;
+
+
+Option B
+Use nearest area centroid if polygon unavailable.
+Option C
+Fallback to source neighborhood.
+________________
+
+
+5.17 walkability_score
+Purpose
+How easy / pleasant is this entity’s surrounding context for pedestrian tourism?
+This is not city-level walkability.
+It is micro-area tourist walkability.
+Use 0–100 scale
+Recommended formula
+walkability_score =
+(
+    0.30 * pedestrian_density_score +
+    0.20 * attraction_density_score +
+    0.20 * restaurant_density_score +
+    0.15 * transit_access_score +
+    0.15 * street_friction_penalty_adjusted
+)
+
+
+________________
+
+
+Practical approximation if you don’t have full GIS
+Use nearby density proxies.
+Inputs within 500m
+* count of attractions
+* count of restaurants/cafes
+* count of experiences
+* count of transit nodes
+* road hostility / highway barrier penalty (if available)
+Simple production-safe formula
+walkability_score =
+min(100,
+    15 * ln(1 + nearby_attractions_500m)
+  + 10 * ln(1 + nearby_food_500m)
+  + 8  * ln(1 + nearby_experiences_500m)
+  + 6  * ln(1 + nearby_transit_500m)
+  - highway_penalty
+)
+
+
+SQL example
+UPDATE feed_entities fe
+JOIN (
+    SELECT
+        a.item_id,
+        COUNT(DISTINCT CASE WHEN b.anchor_attraction = 1 OR b.context_attraction = 1 THEN b.item_id END) AS nearby_attractions,
+        COUNT(DISTINCT CASE WHEN b.food = 1 THEN b.item_id END) AS nearby_food,
+        COUNT(DISTINCT CASE WHEN b.experience = 1 THEN b.item_id END) AS nearby_experiences
+    FROM feed_entities a
+    JOIN feed_entities b
+      ON a.item_id <> b.item_id
+     AND ST_Distance_Sphere(POINT(a.lng,a.lat), POINT(b.lng,b.lat)) <= 500
+    GROUP BY a.item_id
+) x ON fe.item_id = x.item_id
+SET fe.walkability_score = LEAST(
+    100,
+    ROUND(
+        15 * LN(1 + x.nearby_attractions) +
+        10 * LN(1 + x.nearby_food) +
+        8  * LN(1 + x.nearby_experiences),
+    2)
+);
+
+
+________________
+
+
+F. FEED BEHAVIOR METADATA
+These are feed-structural fields.
+They are not “about the POI” only — they are about how the POI behaves inside a feed.
+This is what makes your system powerful.
+________________
+
+
+5.18 clusterable
+Purpose
+Can this item naturally appear inside a local cluster / collection / area bundle?
+Examples clusterable:
+* hidden alley café
+* small gallery
+* street market corner
+* neighborhood viewpoint
+Examples not very clusterable:
+* Louvre
+* Eiffel Tower
+* airport express
+* ticketed timed event
+Final logic
+Set true if the item is:
+* spatially dense with other compatible items
+* not too dominant
+* not too commitment-heavy
+* not too singular
+Recommended formula
+clusterable = 1 if:
+    duration_min <= 90
+    AND advance_commitment_level IN ('none','light','moderate')
+    AND popularity_score < 92
+    AND nearby_compatible_items_400m >= 3
+
+
+SQL example
+UPDATE feed_entities fe
+JOIN (
+    SELECT
+        a.item_id,
+        COUNT(*) AS nearby_count
+    FROM feed_entities a
+    JOIN feed_entities b
+      ON a.item_id <> b.item_id
+     AND ST_Distance_Sphere(POINT(a.lng,a.lat), POINT(b.lng,b.lat)) <= 400
+    GROUP BY a.item_id
+) n ON fe.item_id = n.item_id
+SET fe.clusterable =
+CASE
+    WHEN fe.duration_min <= 90
+     AND fe.advance_commitment_level IN ('none','light','moderate')
+     AND fe.popularity_score < 92
+     AND n.nearby_count >= 3
+    THEN 1 ELSE 0
+END;
+
+
+________________
+
+
+5.19 hero_potential
+Purpose
+Can this item carry a major feed moment on its own?
+This is very important.
+Examples:
+* Eiffel Tower
+* sunset rooftop
+* iconic food stop
+* unforgettable boat ride
+* cathedral skyline viewpoint
+Final logic
+An item has hero potential if it is:
+* visually / emotionally strong
+* culturally important
+* high confidence
+* singular enough to headline a feed slot
+Recommended formula
+hero_score =
+0.40 * popularity_score
++ 0.30 * editorial_priority
++ 0.15 * scenic_strength
++ 0.15 * uniqueness_strength
+
+
+Then:
+hero_potential = 1 if hero_score >= 72
+
+
+If you don’t yet have scenic/uniqueness, use heuristics:
+UPDATE feed_entities
+SET hero_potential =
+CASE
+    WHEN popularity_score >= 80 THEN 1
+    WHEN editorial_priority >= 80 THEN 1
+    WHEN anchor_attraction = 1 AND rating >= 4.5 AND review_count >= 1000 THEN 1
+    WHEN category IN ('viewpoint','iconic_bridge','sunset_rooftop','signature_market') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.20 night_compatible
+Purpose
+Can this item naturally make sense in evening / night feed states?
+Examples true
+* rooftop bars
+* lit monuments
+* food streets
+* evening cruises
+* jazz clubs
+* city viewpoints with lights
+Examples false
+* botanical gardens that close early
+* outdoor ruins with poor night experience
+* day-only scenic lookouts
+Population logic
+UPDATE feed_entities
+SET night_compatible =
+CASE
+    WHEN item_type IN ('food','event') THEN 1
+    WHEN category IN ('rooftop_bar','night_market','jazz_bar','lit_landmark','evening_cruise') THEN 1
+    WHEN JSON_EXTRACT(opening_hours_json, '$.fri[0].close') >= '20:00' THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.21 family_friendly
+Purpose
+Can this safely and naturally fit family-oriented tourist sessions?
+Good signals
+* stroller manageable
+* not adult-oriented
+* low chaos
+* not physically punishing
+* children likely to tolerate
+Heuristic
+UPDATE feed_entities
+SET family_friendly =
+CASE
+    WHEN category IN ('museum','park','aquarium','zoo','public_square','family_restaurant','boat_ride') THEN 1
+    WHEN category IN ('nightclub','cocktail_bar','hard_hike','adult_show') THEN 0
+    WHEN activity_energy IN ('high','exhausting') THEN 0
+    ELSE 1
+END;
+
+
+________________
+
+
+5.22 rain_friendly
+Purpose
+Can this still work on a rainy day?
+Important because
+This becomes a powerful later opportunity fallback.
+True examples
+* museums
+* covered markets
+* cafés
+* arcades
+* indoor experiences
+False examples
+* exposed viewpoints
+* beaches
+* long scenic walks
+* open plazas
+Populate
+UPDATE feed_entities
+SET rain_friendly =
+CASE
+    WHEN category IN ('museum','gallery','cafe','restaurant','indoor_market','arcade','aquarium') THEN 1
+    WHEN item_type = 'event' AND venue_type = 'indoor' THEN 1
+    WHEN activity_type_json LIKE '%indoor%' THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+G. COMFORT / EXPOSURE METADATA
+This section is extremely underrated and will make your feed feel smart.
+This is where your product starts feeling truly situational.
+________________
+
+
+5.23 sun_exposure
+Purpose
+How exposed is the experience to direct sun?
+Allowed values
+low
+medium
+high
+extreme
+
+
+Examples
+* museum → low
+* shaded old town lane → low/medium
+* open plaza → high
+* beach / hilltop / rooftop noon exposure → extreme
+Populate
+UPDATE feed_entities
+SET sun_exposure =
+CASE
+    WHEN category IN ('museum','gallery','church','indoor_market','restaurant_indoor') THEN 'low'
+    WHEN category IN ('old_town_walk','garden','park') THEN 'medium'
+    WHEN category IN ('open_square','riverfront','viewpoint','rooftop') THEN 'high'
+    WHEN category IN ('beach','desert_walk','exposed_hike') THEN 'extreme'
+    ELSE 'medium'
+END;
+
+
+________________
+
+
+5.24 rain_exposure
+Purpose
+How badly rain damages the experience.
+Allowed values
+low
+medium
+high
+extreme
+
+
+Populate
+UPDATE feed_entities
+SET rain_exposure =
+CASE
+    WHEN rain_friendly = 1 THEN 'low'
+    WHEN category IN ('park','old_town_walk','garden') THEN 'medium'
+    WHEN category IN ('viewpoint','beach','riverwalk','open_market') THEN 'high'
+    WHEN category IN ('boat_without_cover','cliff_walk','exposed_hike') THEN 'extreme'
+    ELSE 'medium'
+END;
+
+
+________________
+
+
+5.25 wind_exposure
+Purpose
+How sensitive the entity is to windy conditions.
+Allowed values
+low
+medium
+high
+extreme
+
+
+Populate
+UPDATE feed_entities
+SET wind_exposure =
+CASE
+    WHEN category IN ('museum','gallery','indoor_restaurant') THEN 'low'
+    WHEN category IN ('city_walk','park','street_food') THEN 'medium'
+    WHEN category IN ('rooftop','bridge_walk','waterfront','viewpoint') THEN 'high'
+    WHEN category IN ('cliff_viewpoint','open_beach','mountain_peak') THEN 'extreme'
+    ELSE 'medium'
+END;
+
+
+________________
+
+
+5.26 requires_good_visibility
+Purpose
+Does this entity lose much of its value in haze / fog / low-visibility conditions?
+True examples
+* skyline viewpoints
+* mountain overlooks
+* panorama towers
+* scenic drives
+False examples
+* museums
+* cafés
+* markets
+* many interiors
+Populate
+UPDATE feed_entities
+SET requires_good_visibility =
+CASE
+    WHEN category IN ('viewpoint','tower','panorama','scenic_overlook','skydeck') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.27 benefits_from_clear_sky
+Purpose
+Softer version of visibility dependence.
+Some items are still usable in imperfect conditions but become much better in clear weather.
+Examples true
+* rooftop dining
+* gardens
+* waterfront promenades
+* cathedral exterior
+* plaza cafés
+Populate
+UPDATE feed_entities
+SET benefits_from_clear_sky =
+CASE
+    WHEN category IN ('rooftop','garden','waterfront','outdoor_cafe','landmark_exterior','plaza') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.28 best_in_heat
+Purpose
+Can this become a smart hot-weather recommendation?
+This is very valuable in travel.
+Examples true
+* shaded gardens
+* indoor museums
+* river cruises
+* pool clubs
+* air-conditioned shopping arcades
+* evening markets (depending on time)
+Populate
+UPDATE feed_entities
+SET best_in_heat =
+CASE
+    WHEN category IN ('museum','gallery','indoor_market','aquarium','covered_arcade','boat_cruise','shaded_garden') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+5.29 best_in_cool_evening
+Purpose
+Can this become especially good in late afternoon / sunset / cool-night conditions?
+This is one of the best tourism feed signals.
+Examples true
+* rooftop bars
+* promenades
+* night markets
+* lit monuments
+* waterfront walks
+* outdoor dining streets
+Populate
+UPDATE feed_entities
+SET best_in_cool_evening =
+CASE
+    WHEN category IN ('rooftop_bar','night_market','waterfront_walk','lit_landmark','sunset_viewpoint','outdoor_dining') THEN 1
+    ELSE 0
+END;
+
+
+________________
+
+
+6) HIGHLY RECOMMENDED EXTRA FOUNDATION FIELDS
+These were not in your original list, but I strongly recommend adding them because they will make the whole system much better.
+________________
+
+
+6.1 scenic_score (0–100)
+Purpose
+How visually rewarding / photogenic / emotionally scenic is this item?
+This is very important for travel feeds.
+Can be derived from:
+* image quality score
+* review keywords
+* category heuristics
+* editorial tags
+________________
+
+
+6.2 uniqueness_score (0–100)
+Purpose
+How destination-distinctive is this item?
+This helps avoid generic filler.
+Examples:
+* Eiffel Tower → 100
+* random café → 20
+* historic literary café unique to city → 75
+________________
+
+
+6.3 crowd_intensity_default (0–100)
+Purpose
+Baseline crowdiness expectation.
+This helps later:
+* avoid fatigue
+* avoid queue stacking
+* suggest calmer alternatives
+________________
+
+
+6.4 access_friction_score (0–100)
+Purpose
+How annoying is it to actually execute?
+Includes:
+* lines
+* ticketing
+* timed entry
+* stairs
+* awkward access
+This is extremely useful.
+________________
+
+
+6.5 shelter_score (0–100)
+Purpose
+How protected is the experience from weather discomfort?
+Very useful for opportunity logic.
+________________
+
+
+7) DATA CONFIDENCE — IMPORTANT
+You should not treat all fields equally trustworthy.
+Add:
+data_confidence_score DECIMAL(5,2)
+
+
+Suggested formula
+data_confidence_score =
+(
+    0.25 * hours_confidence +
+    0.20 * duration_confidence +
+    0.20 * geo_confidence +
+    0.15 * category_confidence +
+    0.20 * metadata_completeness
+)
+
+
+This lets later systems degrade gracefully.
+________________
+
+
+8) RECOMMENDED POPULATION PIPELINE
+Use a 4-step materialization pipeline.
+________________
+
+
+STEP 1 — Canonical entity ingestion
+Unify all feedable sources:
+INSERT INTO feed_entities_base (item_id, source_type, source_id, ...)
+SELECT ...
+FROM Sight
+
+
+UNION ALL
+SELECT ...
+FROM Restaurant
+
+
+UNION ALL
+SELECT ...
+FROM Experience
+
+
+UNION ALL
+SELECT ...
+FROM Event;
+
+
+________________
+
+
+STEP 2 — Taxonomy enrichment
+Assign:
+* item_type
+* role booleans
+* category family
+* tourist area
+* spatial info
+________________
+
+
+STEP 3 — Heuristic enrichment
+Compute:
+* duration
+* energy
+* comfort exposure
+* feed behavior flags
+* seasonality
+* booking / commitment
+________________
+
+
+STEP 4 — Popularity / quality scoring
+Compute:
+* review_count
+* rating
+* editorial_priority
+* popularity_score
+* walkability_score
+* confidence
+________________
+
+
+9) RECOMMENDED REFRESH CADENCE
+Not every field should refresh equally.
+________________
+
+
+Daily
+* opening hours (if source supports)
+* event data
+* temporary closures
+* review count
+* rating
+Weekly
+* popularity score
+* walkability score
+* hero_potential
+* clusterable
+Monthly
+* duration heuristics refinement
+* seasonality
+* editorial recalibration
+* uniqueness / scenic enrichments
+________________
+
+
+10) FINAL RECOMMENDED FOUNDATION OUTPUT
+This layer should produce one clean entity record like:
+{
+  "item_id": 1200041,
+  "item_type": "anchor_attraction",
+  "anchor_attraction": true,
+  "context_attraction": false,
+  "experience": false,
+  "food": false,
+  "enabler": false,
+  "event": false,
+
+
+  "popularity_score": 91.4,
+  "review_count": 18423,
+  "rating": 4.7,
+  "editorial_priority": 95,
+
+
+  "opening_hours": {
+    "mon": [{"open":"09:00","close":"18:00"}],
+    "tue": [{"open":"09:00","close":"18:00"}]
+  },
+  "duration_min": 110,
+  "seasonality": {
+    "best_months":[3,4,5,9,10,11],
+    "okay_months":[1,2,6,7,8,12],
+    "poor_months":[],
+    "seasonal_only":false
+  },
+  "booking_required": true,
+  "advance_commitment_level": "moderate",
+
+
+  "activity_energy": "medium",
+  "activity_type": ["walk","indoor","cultural","passive"],
+
+
+  "lat": 48.8606,
+  "lng": 2.3376,
+  "area_id": 5021,
+  "walkability_score": 87.2,
+
+
+  "clusterable": false,
+  "hero_potential": true,
+  "night_compatible": false,
+  "family_friendly": true,
+  "rain_friendly": true,
+
+
+  "sun_exposure": "low",
+  "rain_exposure": "low",
+  "wind_exposure": "low",
+  "requires_good_visibility": false,
+  "benefits_from_clear_sky": false,
+  "best_in_heat": true,
+  "best_in_cool_evening": false,
+
+
+  "data_confidence_score": 88.5
+}
+
+
+________________
+
+
+11) My strong product recommendation
+If you want this system to become really strong, do not stop at raw metadata.
+Your Entity Foundation Layer should ultimately become:
+“Stable Entity Intelligence Layer”
+Meaning it should capture:
+* what this is
+* how big it is
+* how demanding it is
+* when it works
+* what weather it likes
+* what kind of feed role it can support
+That is the real foundation of an intelligent tourism feed.
+________________
+
+
+If you want, I can do the next level version of this and turn it into:
+ENTITY FOUNDATION LAYER — FULL SQL/TABLE/PIPELINE SPEC
+with:
+* exact schema for all support tables
+* full ETL flow
+* materialized view design
+* MySQL-compatible queries
+* index strategy
+* null handling rules
+* confidence fallbacks
+* category mapping architecture
+That would be the implementation-ready engineering version.

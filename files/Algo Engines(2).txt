@@ -1,0 +1,1637 @@
+﻿Module 3 - STRUCTURAL IMPORTANCE ENGINE
+SQL / TABLE / COMPUTATION SPEC (FINAL)
+________________
+
+
+0) PURPOSE OF THIS MODULE
+This module computes:
+How much an entity matters to the structural architecture of a trip
+This is not:
+* time-sensitive relevance
+* weather fit
+* “best nearby now”
+* user-specific personalization
+This is:
+* trip spine importance
+* district importance
+* collective destination importance
+* supportive route importance
+________________
+
+
+1) FINAL OUTPUTS OF THIS MODULE
+Each entity should get:
+* poi_anchor_score
+* composite_anchor_score
+* collective_destination_score
+* soft_anchor_score
+* trip_value_score
+* structural_importance_score
+* structural_class
+These should be stored in a dedicated table.
+________________
+
+
+2) WHAT THIS MODULE WILL NEED AS INPUT
+This module should read from:
+* Sight
+* Restaurant
+* Experience
+* optional anchor/sub-anchor mapping table
+* optional review-signal mapping table
+* Location table
+* optional graph tables later
+For now, we will make this buildable without requiring your full graph engine.
+That’s important.
+________________
+
+
+3) FINAL TABLES TO CREATE
+You should create 4 tables for this engine:
+1. entity_structural_base
+2. destination_clusters
+3. destination_cluster_members
+4. entity_structural_importance
+________________
+
+
+4) TABLE 1 — entity_structural_base
+This is the unified normalized input layer for the engine.
+It pulls all entities from Sight, Restaurant, and Experience into one common scoring table.
+This makes everything much easier downstream.
+________________
+
+
+SQL — Create entity_structural_base
+CREATE TABLE entity_structural_base (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+    location_id BIGINT UNSIGNED DEFAULT NULL,
+
+
+    title VARCHAR(255) DEFAULT NULL,
+
+
+    lat DECIMAL(10,8) DEFAULT NULL,
+    lng DECIMAL(11,8) DEFAULT NULL,
+
+
+    category VARCHAR(150) DEFAULT NULL,
+    sub_category VARCHAR(150) DEFAULT NULL,
+
+
+    aggregate_rating DECIMAL(8,4) DEFAULT NULL,
+    review_count INT DEFAULT NULL,
+
+
+    popularity_score DECIMAL(8,4) DEFAULT NULL,
+    recommendation_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    is_landmark_manual TINYINT(1) DEFAULT 0,
+    is_unique_manual TINYINT(1) DEFAULT 0,
+    is_destination_restaurant TINYINT(1) DEFAULT 0,
+    is_signature_experience TINYINT(1) DEFAULT 0,
+
+
+    category_anchor_prior DECIMAL(8,4) DEFAULT NULL,
+    category_uniqueness_prior DECIMAL(8,4) DEFAULT NULL,
+
+
+    city_review_percentile DECIMAL(8,4) DEFAULT NULL,
+    local_density_score DECIMAL(8,4) DEFAULT NULL,
+    local_category_density DECIMAL(8,4) DEFAULT NULL,
+    city_category_density DECIMAL(8,4) DEFAULT NULL,
+
+
+    anchor_signal_coverage DECIMAL(8,4) DEFAULT NULL,
+    tag_distinctiveness_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uq_entity (entity_type, entity_id),
+    KEY idx_location (location_id),
+    KEY idx_type (entity_type),
+    KEY idx_rating_reviews (aggregate_rating, review_count),
+    KEY idx_coords (lat, lng)
+);
+
+
+________________
+
+
+5) WHAT EACH FIELD IN entity_structural_base MEANS + HOW TO POPULATE IT
+Now I’ll explain every required field, where it comes from, and how to compute it.
+________________
+
+
+6) CORE IDENTITY FIELDS
+________________
+
+
+6.1 entity_type
+Meaning
+Tells you whether the entity came from:
+* Sight
+* Restaurant
+* Experience
+Values
+* 'sight'
+* 'restaurant'
+* 'experience'
+Populate from
+Hardcoded during insert.
+________________
+
+
+6.2 entity_id
+Meaning
+The original ID from the source table.
+Populate from
+* Sight.id
+* Restaurant.id
+* Experience.id
+________________
+
+
+6.3 location_id
+Meaning
+The city / place the entity belongs to.
+Populate from
+Your source entity table location field.
+This is essential because Structural Importance is city-relative.
+A place may be structurally huge in one city and average in another.
+________________
+
+
+6.4 title
+Meaning
+Entity name.
+Populate from
+* Sight.Name
+* Restaurant.Name
+* Experience.Name
+(or equivalent title/name field)
+________________
+
+
+7) GEO FIELDS
+________________
+
+
+7.1 lat, lng
+Meaning
+Coordinates of the entity.
+Why needed
+Used for:
+* local density
+* cluster generation
+* anchor adjacency
+* route support
+* collective destination logic
+Populate from
+Your entity tables.
+This is mandatory.
+________________
+
+
+8) CATEGORY FIELDS
+________________
+
+
+8.1 category
+Meaning
+Main normalized entity type bucket.
+Examples:
+* museum
+* monument
+* market
+* restaurant
+* cafe
+* bar
+* pub
+* walking tour
+* river cruise
+Why needed
+Used for:
+* category priors
+* uniqueness
+* cluster identity
+* structural role
+Populate from
+Your raw category field.
+If raw categories are messy, normalize them into a cleaner bucket.
+Recommendation
+Create a category normalization map.
+Example:
+Raw
+	Normalized
+	Art Museum
+	museum
+	Science Museum
+	museum
+	Pub
+	pub
+	Cocktail Bar
+	bar
+	Fine Dining Restaurant
+	restaurant
+	Boat Tour
+	river_cruise
+	This is worth doing.
+________________
+
+
+8.2 sub_category
+Meaning
+A more specific version of category.
+Examples:
+* natural history museum
+* rooftop cocktail bar
+* immersive theatre
+* indian restaurant
+Why needed
+Useful for:
+* uniqueness
+* collective destination theme
+* category saturation
+Populate from
+Raw subcategory / taxonomy / inferred tags.
+________________
+
+
+9) QUALITY / DEMAND FIELDS
+________________
+
+
+9.1 aggregate_rating
+Meaning
+Entity quality rating.
+Populate from
+Your source rating field.
+If your source rating is on 1–5 scale, keep it raw for now.
+Later normalize in queries.
+________________
+
+
+9.2 review_count
+Meaning
+How many reviews support the rating.
+Why needed
+Very important for:
+* popularity
+* confidence
+* fame
+* anchorability
+Populate from
+Source review count field.
+________________
+
+
+9.3 popularity_score
+Meaning
+Platform-level popularity or rank-based strength.
+Use if available
+If you already have:
+* ranking score
+* popularity metric
+* impression-based score
+* recommendation score variant
+If not available
+Leave nullable for now.
+________________
+
+
+9.4 recommendation_score
+Meaning
+Your own internal quality/recommendation score.
+You already use recommendation-style scoring in parts of your system.
+Why useful
+This can often be more stable than raw ratings.
+If you have both:
+Use both later.
+________________
+
+
+10) MANUAL OVERRIDE FLAGS
+These are very important.
+Because some structurally important places are obvious to humans but underdetected by raw metrics.
+________________
+
+
+10.1 is_landmark_manual
+Meaning
+Manual override that this entity is clearly a landmark / trip anchor.
+Use for examples
+* Tower of London
+* Buckingham Palace
+* Big Ben
+* Natural History Museum
+Values
+* 1 = yes
+* 0 = no
+Why needed
+This helps stabilize obvious trip anchors.
+________________
+
+
+10.2 is_unique_manual
+Meaning
+Manual override that the entity is unusually unique / irreplaceable.
+Useful for:
+* heritage restaurants
+* unusual experiences
+* hidden but structurally meaningful attractions
+________________
+
+
+10.3 is_destination_restaurant
+Meaning
+This restaurant is not just “good” — it is a destination-worthy food draw.
+Examples:
+* iconic market vendor
+* institution restaurant
+* chef-signature place
+* widely recognized culinary draw
+Why needed
+Restaurants should have a higher bar before becoming anchors.
+This field helps.
+________________
+
+
+10.4 is_signature_experience
+Meaning
+This experience is a city-signature experience.
+Examples:
+* iconic river cruise
+* signature theatre experience
+* famous immersive event
+________________
+
+
+11) CATEGORY PRIOR FIELDS
+These are very important.
+Because different entity types have different default structural roles.
+A museum is structurally more likely to be a trip anchor than a generic café.
+________________
+
+
+11.1 category_anchor_prior
+Meaning
+How structurally anchor-capable this category is by default.
+Scale
+Use 0.00 to 1.00
+Example values
+Category
+	Prior
+	iconic_museum
+	1.00
+	landmark_monument
+	1.00
+	palace
+	1.00
+	major_market
+	0.85
+	observation_deck
+	0.80
+	river_cruise
+	0.75
+	theatre
+	0.70
+	destination_restaurant
+	0.70
+	pub
+	0.35
+	cafe
+	0.25
+	generic_restaurant
+	0.20
+	How to populate
+Use a lookup table or CASE statement.
+You should absolutely create a category prior mapping table.
+________________
+
+
+11.2 category_uniqueness_prior
+Meaning
+How structurally unique this category tends to be.
+Why needed
+Some categories are naturally:
+* more special
+* less replaceable
+Example:
+* historic market → higher
+* generic café → lower
+Populate from
+Same lookup table approach.
+________________
+
+
+12) RELATIVE POSITION FIELDS
+These are derived, not directly stored in source tables.
+These are very important.
+________________
+
+
+12.1 city_review_percentile
+Meaning
+Where this entity ranks in review count relative to all entities in the city.
+Example
+If an entity is in the top 5% by reviews in London, this should be high.
+Why needed
+Raw review counts are misleading across cities.
+Percentiles are much better.
+How to calculate
+For each location_id, compute percentile rank of review_count.
+SQL logic (conceptually)
+PERCENT_RANK() OVER (
+    PARTITION BY location_id
+    ORDER BY review_count
+)
+
+
+Store result as 0.00–1.00.
+________________
+
+
+12.2 local_density_score
+Meaning
+How dense the surrounding entity environment is.
+Why needed
+Used for:
+* composite anchor logic
+* collective destination logic
+* cluster membership
+* co-visit strength
+How to calculate
+For each entity:
+Count nearby entities within a walk radius.
+Recommended radius
+Use multiple radii:
+* 250m
+* 500m
+* 900m
+Then blend them.
+Recommended formula
+local_density_score =
+  0.45 * nearby_entities_250m_norm +
+  0.35 * nearby_entities_500m_norm +
+  0.20 * nearby_entities_900m_norm
+
+
+Normalize city-wide afterward.
+________________
+
+
+12.3 local_category_density
+Meaning
+How many nearby places of the same category exist.
+Why needed
+Used for uniqueness.
+Example
+If a café sits in a street with 40 cafés nearby, uniqueness should drop.
+How to calculate
+Count nearby same-category entities within 500m / 800m.
+________________
+
+
+12.4 city_category_density
+Meaning
+How saturated this category is across the whole city.
+Why needed
+Also used for uniqueness.
+Example
+If there are 2,500 generic restaurants in the city, that category is highly replaceable.
+How to calculate
+For each category within location:
+count(category) / total_entities_in_location
+
+
+Or raw count normalized.
+________________
+
+
+13) SIGNAL / DISTINCTIVENESS FIELDS
+These are where your signal-anchor mapping becomes useful.
+This is a very strong addition to your engine.
+________________
+
+
+13.1 anchor_signal_coverage
+Meaning
+How richly this entity expresses structurally meaningful anchor/sub-anchor signals.
+Example
+If an entity strongly maps to:
+* heritage
+* culture
+* iconic
+* family
+* local identity
+* nightlife
+* culinary destination
+then its structural identity is richer.
+Why needed
+This helps distinguish:
+* generic places
+from
+* structurally expressive places
+How to populate
+From your signal_anchor_map / review-derived signal tables.
+Simple way
+For each entity:
+   * count distinct meaningful anchor/sub-anchor signals
+   * weighted by confidence / frequency
+Example formula
+anchor_signal_coverage =
+  weighted_distinct_signal_count / max_city_signal_count
+
+
+Normalize to 0–1.
+________________
+
+
+13.2 tag_distinctiveness_score
+Meaning
+How unusual / specific the entity’s identity is compared to others nearby.
+Why needed
+Useful for uniqueness and trip value.
+Example
+A generic brunch café → low
+A Victorian science museum or iconic spice-market-style restaurant → high
+How to populate
+Use:
+   * rarity of sub-anchors
+   * rarity of tags in local radius
+   * rarity of experience theme
+Practical version
+For each entity:
+   * take its top anchor/sub-anchor tags
+   * compute inverse local frequency
+Formula
+tag_distinctiveness_score =
+  average(inverse_frequency_of_top_tags_in_local_area)
+
+
+________________
+
+
+14) HOW TO POPULATE entity_structural_base
+You should populate this table in one batch pipeline.
+________________
+
+
+STEP A — Insert normalized entities
+Insert all from:
+   * Sight
+   * Restaurant
+   * Experience
+Map them into common fields.
+________________
+
+
+Example — Insert from Sight
+INSERT INTO entity_structural_base (
+    entity_type, entity_id, location_id, title, lat, lng,
+    category, sub_category,
+    aggregate_rating, review_count, popularity_score, recommendation_score
+)
+SELECT
+    'sight',
+    s.id,
+    s.location_id,
+    s.Name,
+    s.Latitude,
+    s.Longitude,
+    s.Category,
+    s.SubCategory,
+    s.TAAggregateRating,
+    s.TATotalReviews,
+    s.PopularityScore,
+    s.RecommendationScore
+FROM Sight s
+WHERE s.Latitude IS NOT NULL
+  AND s.Longitude IS NOT NULL;
+
+
+Do the same for Restaurant and Experience.
+________________
+
+
+STEP B — Update category priors
+Use a mapping table.
+Create:
+CREATE TABLE category_structural_priors (
+    category VARCHAR(150) PRIMARY KEY,
+    category_anchor_prior DECIMAL(8,4) DEFAULT NULL,
+    category_uniqueness_prior DECIMAL(8,4) DEFAULT NULL
+);
+
+
+Then update:
+UPDATE entity_structural_base esb
+JOIN category_structural_priors csp
+  ON esb.category = csp.category
+SET
+  esb.category_anchor_prior = csp.category_anchor_prior,
+  esb.category_uniqueness_prior = csp.category_uniqueness_prior;
+
+
+________________
+
+
+STEP C — Compute percentile and density fields
+Then populate:
+   * city_review_percentile
+   * local_density_score
+   * local_category_density
+   * city_category_density
+   * anchor_signal_coverage
+   * tag_distinctiveness_score
+This is best done in Python or Laravel batch jobs.
+It is possible in SQL too, but Python is cleaner for geo calculations.
+________________
+
+
+15) TABLE 2 — destination_clusters
+This table stores walkable destination pockets / structural zones.
+This is essential for:
+   * composite anchors
+   * collective destinations
+   * area gravity
+________________
+
+
+SQL — Create destination_clusters
+CREATE TABLE destination_clusters (
+    cluster_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+
+
+    location_id BIGINT UNSIGNED DEFAULT NULL,
+
+
+    cluster_name VARCHAR(255) DEFAULT NULL,
+    cluster_type VARCHAR(100) DEFAULT NULL,
+
+
+    centroid_lat DECIMAL(10,8) DEFAULT NULL,
+    centroid_lng DECIMAL(11,8) DEFAULT NULL,
+
+
+    entity_count INT DEFAULT NULL,
+    sight_count INT DEFAULT NULL,
+    restaurant_count INT DEFAULT NULL,
+    experience_count INT DEFAULT NULL,
+
+
+    avg_rating DECIMAL(8,4) DEFAULT NULL,
+    total_review_count BIGINT DEFAULT NULL,
+
+
+    density_score DECIMAL(8,4) DEFAULT NULL,
+    cohesion_score DECIMAL(8,4) DEFAULT NULL,
+    diversity_score DECIMAL(8,4) DEFAULT NULL,
+    walkability_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    anchor_concentration_score DECIMAL(8,4) DEFAULT NULL,
+    destination_gravity_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    collective_identity_strength DECIMAL(8,4) DEFAULT NULL,
+    cluster_theme_clarity DECIMAL(8,4) DEFAULT NULL,
+    cluster_repeatability DECIMAL(8,4) DEFAULT NULL,
+    cluster_saturation_quality DECIMAL(8,4) DEFAULT NULL,
+    cluster_collective_strength DECIMAL(8,4) DEFAULT NULL,
+
+
+    is_collective_destination TINYINT(1) DEFAULT 0,
+    is_composite_anchor_zone TINYINT(1) DEFAULT 0,
+
+
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    KEY idx_location (location_id),
+    KEY idx_cluster_type (cluster_type),
+    KEY idx_gravity (destination_gravity_score)
+);
+
+
+________________
+
+
+16) WHAT EACH CLUSTER FIELD MEANS + HOW TO CALCULATE IT
+________________
+
+
+16.1 cluster_name
+Meaning
+Human-readable label if possible.
+Examples:
+   * Covent Garden Core
+   * Soho Dining Strip
+   * South Bank Riverside Cluster
+Populate
+Optional initially.
+You can leave null at first.
+________________
+
+
+16.2 cluster_type
+Meaning
+The dominant identity of the cluster.
+Examples:
+   * sightseeing
+   * food
+   * nightlife
+   * mixed
+   * waterfront
+   * museum_district
+   * dining_strip
+How to calculate
+Based on dominant category mix.
+________________
+
+
+16.3 centroid_lat, centroid_lng
+Meaning
+Cluster center point.
+How to calculate
+Average lat/lng of members or weighted centroid.
+________________
+
+
+16.4 entity_count, sight_count, restaurant_count, experience_count
+Meaning
+Composition of the cluster.
+Used for:
+   * diversity
+   * identity
+   * collective destination logic
+________________
+
+
+16.5 avg_rating
+Meaning
+Average entity quality in the cluster.
+Use weighted average if possible
+Prefer weighting by review confidence.
+________________
+
+
+16.6 total_review_count
+Meaning
+Review mass of the cluster.
+This is a strong destination gravity signal.
+________________
+
+
+17) CLUSTER STRENGTH FIELDS
+These are very important.
+________________
+
+
+17.1 density_score
+Meaning
+How dense the cluster is.
+How to calculate
+Use:
+   * entity count per area
+   * or average nearest-neighbor compactness
+Practical version
+Normalize entity count adjusted by cluster radius.
+________________
+
+
+17.2 cohesion_score
+Meaning
+How spatially tight and coherent the cluster is.
+Why needed
+A dense but scattered area is weaker than a tight, walkable one.
+How to calculate
+Use:
+   * mean distance to centroid
+   * pairwise compactness
+   * spatial spread
+Tighter cluster = higher score.
+________________
+
+
+17.3 diversity_score
+Meaning
+How structurally diverse the cluster is.
+Why needed
+Mixed clusters often make stronger destination zones.
+Example
+A zone with:
+   * attraction + food + experience
+is often more structurally powerful than
+   * 12 isolated same-type entities
+How to calculate
+Entropy or mix score across entity types / categories.
+________________
+
+
+17.4 walkability_score
+Meaning
+How easy it is to experience the cluster on foot.
+Practical version
+Use:
+      * cluster compactness
+      * street-network approximation later if needed
+      * average internal walking distance proxy
+Simple approximation for now
+Tighter + denser = more walkable
+________________
+
+
+17.5 anchor_concentration_score
+Meaning
+How many strong anchor-capable entities exist in the cluster.
+Why needed
+This is crucial for:
+      * composite anchor logic
+      * area gravity
+How to calculate
+After intrinsic scores are computed, sum or average high-anchor entities in cluster.
+________________
+
+
+17.6 destination_gravity_score
+Meaning
+How destination-worthy the cluster is overall.
+Formula
+destination_gravity_score =
+  0.25 * density_score +
+  0.20 * cohesion_score +
+  0.15 * diversity_score +
+  0.20 * walkability_score +
+  0.20 * anchor_concentration_score
+
+
+This is a key cluster-level field.
+________________
+
+
+18) COLLECTIVE DESTINATION FIELDS
+These are specifically for food lane / nightlife strip / district logic.
+________________
+
+
+18.1 collective_identity_strength
+Meaning
+How clearly the cluster has a recognizable “outing identity”.
+Examples:
+      * nightlife zone
+      * Indian dining pocket
+      * museum quarter
+      * waterfront café strip
+How to calculate
+Use:
+      * category concentration
+      * tag similarity
+      * sub-anchor coherence
+      * dominant theme consistency
+________________
+
+
+18.2 cluster_theme_clarity
+Meaning
+How obvious and stable the cluster’s identity is.
+High example
+A strong nightlife lane.
+Low example
+A random mixed block with no coherent outing identity.
+________________
+
+
+18.3 cluster_repeatability
+Meaning
+Would many travelers independently end up treating this cluster as one outing zone?
+This separates:
+      * real destination pockets
+from
+      * accidental density
+________________
+
+
+18.4 cluster_saturation_quality
+Meaning
+How good the cluster is overall — not just dense.
+Why needed
+A dense but mediocre area should not get overpromoted.
+Formula idea
+cluster_saturation_quality =
+  0.40 * avg_rating_norm +
+  0.35 * high_quality_entity_share +
+  0.25 * total_review_count_norm
+
+
+________________
+
+
+18.5 cluster_collective_strength
+Meaning
+Final cluster-level collective destination strength.
+Formula
+cluster_collective_strength =
+  0.30 * collective_identity_strength +
+  0.20 * cluster_theme_clarity +
+  0.20 * cluster_repeatability +
+  0.30 * cluster_saturation_quality
+
+
+________________
+
+
+18.6 is_collective_destination
+Meaning
+Boolean flag that this cluster is structurally meaningful as a collective destination.
+Rule
+1 if cluster_collective_strength >= 0.68
+else 0
+
+
+________________
+
+
+18.7 is_composite_anchor_zone
+Meaning
+Boolean flag that this cluster behaves like a destination anchor zone.
+Rule
+1 if destination_gravity_score >= 0.72
+else 0
+
+
+________________
+
+
+19) TABLE 3 — destination_cluster_members
+This maps entities to clusters and stores their role within the cluster.
+________________
+
+
+SQL — Create destination_cluster_members
+CREATE TABLE destination_cluster_members (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+
+
+    cluster_id BIGINT UNSIGNED NOT NULL,
+
+
+    entity_type ENUM('sight','restaurant','experience') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    membership_strength DECIMAL(8,4) DEFAULT NULL,
+    centrality_score DECIMAL(8,4) DEFAULT NULL,
+    role_in_cluster VARCHAR(50) DEFAULT NULL,
+
+
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uq_cluster_entity (cluster_id, entity_type, entity_id),
+    KEY idx_cluster (cluster_id),
+    KEY idx_entity (entity_type, entity_id),
+    KEY idx_role (role_in_cluster)
+);
+
+
+________________
+
+
+20) WHAT EACH CLUSTER MEMBER FIELD MEANS
+________________
+
+
+20.1 membership_strength
+Meaning
+How strongly the entity belongs to this cluster.
+High if
+         * close to center
+         * well embedded
+         * category fits cluster identity
+         * surrounded by related entities
+Formula
+membership_strength =
+  0.35 * centroid_proximity_score +
+  0.30 * local_density_score +
+  0.20 * thematic_fit_score +
+  0.15 * local_neighbor_cohesion
+
+
+________________
+
+
+20.2 centrality_score
+Meaning
+How central the entity is to the cluster’s function.
+High if
+         * it sits near the active core
+         * it is not fringe
+         * it is strongly connected to other members
+________________
+
+
+20.3 role_in_cluster
+Values
+Recommended:
+         * core
+         * support
+         * fringe
+         * bridge
+Meaning
+Role
+	Meaning
+	core
+	Central to cluster identity
+	support
+	Helpful cluster member
+	fringe
+	Peripheral presence
+	bridge
+	Connects cluster to route or nearby cluster
+	Why important
+Used later in:
+         * collective destination score
+         * route engine
+         * sequencing
+         * moment framing
+________________
+
+
+21) HOW TO BUILD CLUSTERS (PRACTICAL METHOD)
+This is the simplest strong method for your system.
+________________
+
+
+Recommended clustering method
+Use DBSCAN on all entities within each location_id.
+Recommended starting params for city travel
+For walkable city clustering:
+         * eps = 350m to 500m
+         * min_samples = 4 to 6
+You can tune later.
+Why DBSCAN is good
+It naturally finds:
+         * dense pockets
+         * irregular shaped clusters
+         * walkable zones
+That’s ideal for:
+         * markets
+         * dining streets
+         * museum quarters
+         * nightlife pockets
+________________
+
+
+Suggested pipeline
+For each city (location_id):
+         1. pull all entities with coordinates
+         2. run DBSCAN on lat/lng projected to meters
+         3. assign cluster_id
+         4. compute cluster centroid
+         5. compute cluster-level metrics
+         6. insert cluster members
+This is best done in Python.
+________________
+
+
+22) TABLE 4 — entity_structural_importance
+This is the final output table.
+________________
+
+
+SQL — Create entity_structural_importance
+CREATE TABLE entity_structural_importance (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+    location_id BIGINT UNSIGNED DEFAULT NULL,
+
+
+    poi_anchor_score DECIMAL(8,4) DEFAULT NULL,
+    composite_anchor_score DECIMAL(8,4) DEFAULT NULL,
+    collective_destination_score DECIMAL(8,4) DEFAULT NULL,
+    soft_anchor_score DECIMAL(8,4) DEFAULT NULL,
+    trip_value_score DECIMAL(8,4) DEFAULT NULL,
+    structural_importance_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    structural_class VARCHAR(50) DEFAULT NULL,
+
+
+    intrinsic_importance_score DECIMAL(8,4) DEFAULT NULL,
+    relational_importance_score DECIMAL(8,4) DEFAULT NULL,
+
+
+    landmark_strength DECIMAL(8,4) DEFAULT NULL,
+    fame_strength DECIMAL(8,4) DEFAULT NULL,
+    uniqueness_strength DECIMAL(8,4) DEFAULT NULL,
+    popularity_strength DECIMAL(8,4) DEFAULT NULL,
+    review_confidence_strength DECIMAL(8,4) DEFAULT NULL,
+
+
+    cluster_membership_strength DECIMAL(8,4) DEFAULT NULL,
+    area_gravity_strength DECIMAL(8,4) DEFAULT NULL,
+    co_visit_strength DECIMAL(8,4) DEFAULT NULL,
+    route_support_strength DECIMAL(8,4) DEFAULT NULL,
+    anchor_adjacency_strength DECIMAL(8,4) DEFAULT NULL,
+
+
+    destination_cluster_id BIGINT UNSIGNED DEFAULT NULL,
+    structural_notes TEXT DEFAULT NULL,
+
+
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uq_entity_structural (entity_type, entity_id),
+    KEY idx_location (location_id),
+    KEY idx_structural_class (structural_class),
+    KEY idx_structural_importance (structural_importance_score)
+);
+
+
+________________
+
+
+23) HOW TO CALCULATE EACH FINAL FIELD
+Now we get into the actual engine logic.
+________________
+
+
+24) INTRINSIC SUB-SCORES
+These should be computed first.
+________________
+
+
+24.1 landmark_strength
+Meaning
+How much this entity behaves like a landmark / named trip draw.
+Formula
+landmark_strength =
+  0.35 * review_count_norm +
+  0.25 * popularity_norm +
+  0.20 * category_anchor_prior +
+  0.20 * is_landmark_manual
+
+
+Inputs needed
+         * normalized review count
+         * popularity_score or recommendation proxy
+         * category_anchor_prior
+         * manual flag
+________________
+
+
+24.2 fame_strength
+Meaning
+How known this entity is in city/traveler behavior.
+Formula
+fame_strength =
+  0.45 * city_review_percentile +
+  0.30 * rating_confident_score +
+  0.25 * popularity_rank_score
+
+
+Where:
+         * rating_confident_score = rating weighted by review confidence
+         * popularity_rank_score = normalized popularity rank if available
+________________
+
+
+24.3 uniqueness_strength
+Meaning
+How hard this place is to replace.
+Formula
+uniqueness_strength =
+  0.25 * (1 - local_category_density_norm) +
+  0.20 * (1 - city_category_density_norm) +
+  0.20 * tag_distinctiveness_score +
+  0.15 * category_uniqueness_prior +
+  0.20 * is_unique_manual
+
+
+This is one of the most important fields.
+________________
+
+
+24.4 popularity_strength
+Formula
+popularity_strength =
+  0.45 * review_count_norm +
+  0.25 * aggregate_rating_norm +
+  0.15 * popularity_score_norm +
+  0.15 * recommendation_score_norm
+
+
+________________
+
+
+24.5 review_confidence_strength
+Formula
+review_confidence_strength =
+  min(1.0, log10(review_count + 1) / log10(5000 + 1))
+
+
+You can change the cap depending on city size.
+________________
+
+
+24.6 intrinsic_importance_score
+Formula
+intrinsic_importance_score =
+  0.25 * landmark_strength +
+  0.20 * fame_strength +
+  0.20 * uniqueness_strength +
+  0.20 * popularity_strength +
+  0.15 * review_confidence_strength
+
+
+________________
+
+
+25) RELATIONAL SUB-SCORES
+These depend on clusters and local structure.
+________________
+
+
+25.1 cluster_membership_strength
+Formula
+cluster_membership_strength =
+  0.35 * membership_strength +
+  0.35 * centrality_score +
+  0.30 * thematic_fit_score
+
+
+If thematic_fit_score isn’t available initially, redistribute.
+________________
+
+
+25.2 area_gravity_strength
+This comes mostly from cluster.
+Formula
+area_gravity_strength =
+  0.25 * density_score +
+  0.20 * cohesion_score +
+  0.20 * walkability_score +
+  0.15 * diversity_score +
+  0.20 * anchor_concentration_score
+
+
+This is essentially copied from cluster.
+________________
+
+
+25.3 co_visit_strength
+Meaning
+How naturally this entity fits into a multi-stop outing.
+Practical formula
+co_visit_strength =
+  normalized_sum(
+    nearby high-quality entities within 600m
+  )
+
+
+Better weighted version:
+co_visit_strength =
+  0.50 * nearby_anchor_density +
+  0.30 * nearby_quality_density +
+  0.20 * nearby_route_overlap_density
+
+
+________________
+
+
+25.4 anchor_adjacency_strength
+Meaning
+How much this entity benefits from being near major anchors.
+Formula
+anchor_adjacency_strength =
+  weighted proximity to top structural entities
+
+
+Practical implementation:
+For each entity:
+         * find top anchors within 1.2km
+         * sum:
+anchor_score / distance_decay
+
+
+Where:
+         * 200m = very strong
+         * 500m = moderate
+         * 900m = weaker
+         * beyond 1.2km = low
+________________
+
+
+25.5 route_support_strength
+Meaning
+How much this entity improves route quality.
+Formula
+route_support_strength =
+  0.40 * corridor_presence_score +
+  0.30 * low_detour_bonus +
+  0.20 * enrichment_value_score +
+  0.10 * pause_utility_score
+
+
+Practical first version
+You can approximate using:
+         * proximity to lines between top anchor pairs
+         * low detour cost
+         * category usefulness (scenic / café / break / micro attraction)
+This can be simple at first.
+________________
+
+
+25.6 relational_importance_score
+Formula
+relational_importance_score =
+  0.25 * cluster_membership_strength +
+  0.25 * area_gravity_strength +
+  0.20 * co_visit_strength +
+  0.15 * anchor_adjacency_strength +
+  0.15 * route_support_strength
+
+
+________________
+
+
+26) FINAL OUTPUT SCORES
+Now compute the actual engine outputs.
+________________
+
+
+26.1 poi_anchor_score
+Formula
+poi_anchor_score =
+  0.30 * intrinsic_importance_score +
+  0.20 * landmark_strength +
+  0.20 * uniqueness_strength +
+  0.15 * fame_strength +
+  0.15 * category_anchor_prior
+
+
+________________
+
+
+26.2 composite_anchor_score
+Formula
+composite_anchor_score =
+  0.30 * relational_importance_score +
+  0.25 * area_gravity_strength +
+  0.20 * cluster_membership_strength +
+  0.15 * co_visit_strength +
+  0.10 * anchor_adjacency_strength
+
+
+________________
+
+
+26.3 collective_destination_score
+Formula
+First define:
+role_in_cluster_score
+Role
+	Score
+	core
+	1.00
+	support
+	0.72
+	bridge
+	0.65
+	fringe
+	0.40
+	Then:
+collective_destination_score =
+  0.35 * cluster_collective_strength +
+  0.25 * cluster_membership_strength +
+  0.20 * role_in_cluster_score +
+  0.20 * cluster_saturation_quality
+
+
+________________
+
+
+26.4 soft_anchor_score
+Formula
+soft_anchor_score =
+  0.40 * route_support_strength +
+  0.25 * uniqueness_strength +
+  0.20 * anchor_adjacency_strength +
+  0.15 * co_visit_strength
+
+
+________________
+
+
+26.5 trip_value_score
+Formula
+trip_value_score =
+  max(
+    0.38 * poi_anchor_score +
+    0.24 * composite_anchor_score +
+    0.18 * collective_destination_score +
+    0.20 * soft_anchor_score,
+
+
+    0.45 * intrinsic_importance_score +
+    0.30 * relational_importance_score +
+    0.25 * soft_anchor_score
+  )
+
+
+This works well because different entity types matter in different ways.
+________________
+
+
+26.6 structural_importance_score
+Formula
+structural_importance_score =
+  0.35 * poi_anchor_score +
+  0.25 * composite_anchor_score +
+  0.15 * collective_destination_score +
+  0.10 * soft_anchor_score +
+  0.15 * trip_value_score
+
+
+This is your main downstream structural score.
+________________
+
+
+27) FINAL CLASS ASSIGNMENT LOGIC
+Now assign structural_class.
+This should be deterministic.
+________________
+
+
+Rule 1 — poi_anchor
+IF poi_anchor_score >= 0.78
+AND intrinsic_importance_score >= 0.70
+THEN structural_class = 'poi_anchor'
+
+
+________________
+
+
+Rule 2 — composite_anchor
+IF composite_anchor_score >= 0.72
+AND area_gravity_strength >= 0.65
+THEN structural_class = 'composite_anchor'
+
+
+(and not already POI anchor)
+________________
+
+
+Rule 3 — collective_destination
+IF collective_destination_score >= 0.68
+AND cluster_collective_strength >= 0.65
+THEN structural_class = 'collective_destination'
+
+
+________________
+
+
+Rule 4 — soft_anchor
+IF soft_anchor_score >= 0.58
+OR route_support_strength >= 0.62
+THEN structural_class = 'soft_anchor'
+
+
+________________
+
+
+Rule 5 — utility
+Else:
+structural_class = 'utility'
+
+
+________________
+
+
+28) RECOMMENDED BATCH PIPELINE (ACTUAL EXECUTION ORDER)
+This is the exact order you should run the engine.
+________________
+
+
+PHASE 1 — Build unified structural base
+Run:
+         1. truncate / refresh entity_structural_base
+         2. insert all normalized entities
+         3. update priors
+         4. compute density / percentile / signal fields
+________________
+
+
+PHASE 2 — Compute intrinsic layer
+For each entity compute:
+         * landmark_strength
+         * fame_strength
+         * uniqueness_strength
+         * popularity_strength
+         * review_confidence_strength
+         * intrinsic_importance_score
+You can store these temporarily in Python or directly insert into final table later.
+________________
+
+
+PHASE 3 — Build destination clusters
+For each city:
+         1. cluster entities via DBSCAN
+         2. create destination_clusters
+         3. create destination_cluster_members
+         4. compute cluster-level fields
+________________
+
+
+PHASE 4 — Compute relational layer
+For each entity compute:
+         * cluster_membership_strength
+         * area_gravity_strength
+         * co_visit_strength
+         * anchor_adjacency_strength
+         * route_support_strength
+         * relational_importance_score
+________________
+
+
+PHASE 5 — Compute final structural outputs
+For each entity compute:
+         * poi_anchor_score
+         * composite_anchor_score
+         * collective_destination_score
+         * soft_anchor_score
+         * trip_value_score
+         * structural_importance_score
+         * structural_class
+Store in:
+         * entity_structural_importance
+________________
+
+
+29) WHAT SHOULD BE PRECOMPUTED VS LIVE
+Precompute offline
+This module should be mostly offline.
+Precompute:
+         * all structural scores
+         * clusters
+         * classes
+         * importance
+Live adjustments should NOT happen here
+Do not pollute this engine with:
+         * weather
+         * opening hours
+         * crowd timing
+         * user intent
+         * “good for tonight”
+Those belong in:
+         * Eligibility Engine
+         * Context Engine
+         * Opportunity Engine
+         * Slot Ranking Engine
+This module should remain stable and structural.
+That’s the point.
+________________
+
+
+30) WHAT YOU SHOULD IMPLEMENT FIRST (PRACTICAL MVP)
+If you want the fastest useful version, implement in this order:
+Must build first
+         * entity_structural_base
+         * category_structural_priors
+         * entity_structural_importance
+Strongly recommended next
+         * destination_clusters
+         * destination_cluster_members
+First useful scoring version
+Even before route support gets perfect, you can already build a strong engine using:
+         * intrinsic importance
+         * cluster gravity
+         * collective destination logic
+That alone will already make your system much smarter.
+________________
+
+
+31) MY STRONG RECOMMENDATION FOR YOUR PROJECT
+For your exact travel engine, this module will be especially powerful because it will finally allow your system to understand:
+         * why some places define London
+         * why some neighborhoods are worth surfacing even if no single entity is world-famous
+         * why some dining pockets matter structurally
+         * why small places can still deserve inclusion
+That is exactly what a real city intelligence engine should do.

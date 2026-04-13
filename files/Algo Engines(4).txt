@@ -1,0 +1,1349 @@
+﻿ACTION HORIZON ENGINE — SQL / TABLE / COMPUTATION SPEC
+Purpose
+The Action Horizon Engine determines when an entity matters to the traveler.
+It separates candidates into 3 temporal horizons:
+* DO NOW → best for immediate action
+* DO SOON → highly relevant soon, but not necessarily this second
+* TRIP IMPORTANT → important to know / not miss during the trip
+This module should not replace structural or opportunity scoring.
+It should work as a time-horizon layer on top of them.
+________________
+
+
+FINAL ARCHITECTURE
+You should implement this in 2 layers:
+Layer A — Static / Semi-static Priors (batch computed)
+These are stable or slow-changing entity-level traits.
+Stored in:
+* entity_action_horizon_priors
+Layer B — Runtime Horizon Scoring (session/context computed)
+These depend on:
+* current time
+* weather
+* route
+* user position
+* trip stage
+* current context
+Stored in:
+* session_entity_action_horizon_scores
+________________
+
+
+PART 1 — STATIC TABLES
+These tables support precomputed horizon priors.
+________________
+
+
+TABLE 1 — entity_action_horizon_priors
+This is the main persistent prior table.
+CREATE TABLE entity_action_horizon_priors (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    -- Trip-important priors
+    trip_anchor_importance_score DECIMAL(6,4) NULL,
+    trip_regret_risk_score DECIMAL(6,4) NULL,
+    trip_uniqueness_score DECIMAL(6,4) NULL,
+    trip_logistics_dependency_score DECIMAL(6,4) NULL,
+    trip_deadline_risk_score DECIMAL(6,4) NULL,
+    trip_planning_relevance_score DECIMAL(6,4) NULL,
+
+
+    -- Horizon helper priors
+    base_booking_urgency_score DECIMAL(6,4) NULL,
+    base_time_window_strength_score DECIMAL(6,4) NULL,
+    effort_level_score DECIMAL(6,4) NULL,
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_entity_horizon_priors (entity_type, entity_id),
+    INDEX idx_trip_anchor (trip_anchor_importance_score),
+    INDEX idx_trip_regret (trip_regret_risk_score),
+    INDEX idx_trip_unique (trip_uniqueness_score),
+    INDEX idx_trip_deadline (trip_deadline_risk_score)
+);
+
+
+________________
+
+
+TABLE 2 — entity_time_affinity
+This stores how suitable an entity is across dayparts.
+CREATE TABLE entity_time_affinity (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    sunrise_score DECIMAL(6,4) NULL,
+    morning_score DECIMAL(6,4) NULL,
+    midday_score DECIMAL(6,4) NULL,
+    afternoon_score DECIMAL(6,4) NULL,
+    sunset_score DECIMAL(6,4) NULL,
+    evening_score DECIMAL(6,4) NULL,
+    night_score DECIMAL(6,4) NULL,
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_entity_time_affinity (entity_type, entity_id)
+);
+
+
+________________
+
+
+TABLE 3 — entity_weather_affinity
+This stores how weather-sensitive the entity is.
+CREATE TABLE entity_weather_affinity (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    clear_score DECIMAL(6,4) NULL,
+    cloudy_score DECIMAL(6,4) NULL,
+    rainy_score DECIMAL(6,4) NULL,
+    windy_score DECIMAL(6,4) NULL,
+    hot_score DECIMAL(6,4) NULL,
+    cold_score DECIMAL(6,4) NULL,
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_entity_weather_affinity (entity_type, entity_id)
+);
+
+
+________________
+
+
+TABLE 4 — entity_transition_scores
+This supports Do Soon sequencing.
+CREATE TABLE entity_transition_scores (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    from_entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    from_entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    to_entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    to_entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    transition_score DECIMAL(6,4) NULL,
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_transition (
+        from_entity_type,
+        from_entity_id,
+        to_entity_type,
+        to_entity_id
+    ),
+    INDEX idx_from_entity (from_entity_type, from_entity_id),
+    INDEX idx_to_entity (to_entity_type, to_entity_id)
+);
+
+
+________________
+
+
+TABLE 5 — entity_horizon_metadata
+This stores compact interpretable metadata needed by horizon scoring.
+CREATE TABLE entity_horizon_metadata (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    effort_level TINYINT NULL,                  -- 1 very easy → 5 high effort
+    reservation_need_level TINYINT NULL,        -- 0 none → 5 essential
+    schedule_dependency_level TINYINT NULL,     -- 0 none → 5 highly scheduled
+    transit_dependency_level TINYINT NULL,      -- 0 none → 5 dependent
+    scarcity_level TINYINT NULL,                -- 0 none → 5 highly scarce
+    substitution_density_level TINYINT NULL,    -- 0 unique → 5 many substitutes
+    landmark_level TINYINT NULL,                -- 0 none → 5 iconic
+    planning_relevance_level TINYINT NULL,      -- 0 none → 5 must-plan
+    time_window_strength_level TINYINT NULL,    -- 0 timeless → 5 strongly time-bound
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_horizon_meta (entity_type, entity_id)
+);
+
+
+________________
+
+
+TABLE 6 — entity_operating_windows (Recommended)
+This is optional but strongly recommended if you want robust open_now / do_now.
+CREATE TABLE entity_operating_windows (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    day_of_week TINYINT NOT NULL, -- 1=Mon ... 7=Sun
+    open_time TIME NULL,
+    close_time TIME NULL,
+    is_closed TINYINT(1) NOT NULL DEFAULT 0,
+
+
+    UNIQUE KEY uniq_operating_window (entity_type, entity_id, day_of_week),
+    INDEX idx_entity_day (entity_type, entity_id, day_of_week)
+);
+
+
+________________
+
+
+PART 2 — RUNTIME OUTPUT TABLE
+________________
+
+
+TABLE 7 — session_entity_action_horizon_scores
+This stores runtime per-session outputs.
+CREATE TABLE session_entity_action_horizon_scores (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+
+
+    session_id VARCHAR(100) NOT NULL,
+    entity_type ENUM('sight','restaurant','experience','hotel','area') NOT NULL,
+    entity_id BIGINT UNSIGNED NOT NULL,
+
+
+    -- Do Now components
+    open_now_score DECIMAL(6,4) NULL,
+    immediate_time_fit_score DECIMAL(6,4) NULL,
+    immediate_weather_fit_score DECIMAL(6,4) NULL,
+    immediate_queue_risk_score DECIMAL(6,4) NULL,
+    immediate_accessibility_score DECIMAL(6,4) NULL,
+    immediate_energy_fit_score DECIMAL(6,4) NULL,
+    immediate_distance_fit_score DECIMAL(6,4) NULL,
+    immediate_booking_urgency_score DECIMAL(6,4) NULL,
+
+
+    -- Do Soon components
+    upcoming_time_window_score DECIMAL(6,4) NULL,
+    upcoming_booking_deadline_score DECIMAL(6,4) NULL,
+    upcoming_weather_opportunity_score DECIMAL(6,4) NULL,
+    upcoming_sequence_fit_score DECIMAL(6,4) NULL,
+    upcoming_route_fit_score DECIMAL(6,4) NULL,
+    upcoming_trip_stage_fit_score DECIMAL(6,4) NULL,
+
+
+    -- Trip Important components
+    trip_anchor_importance_score DECIMAL(6,4) NULL,
+    trip_regret_risk_score DECIMAL(6,4) NULL,
+    trip_uniqueness_score DECIMAL(6,4) NULL,
+    trip_logistics_dependency_score DECIMAL(6,4) NULL,
+    trip_deadline_risk_score DECIMAL(6,4) NULL,
+    trip_planning_relevance_score DECIMAL(6,4) NULL,
+
+
+    -- Final outputs
+    do_now_score DECIMAL(6,4) NULL,
+    do_soon_score DECIMAL(6,4) NULL,
+    trip_important_score DECIMAL(6,4) NULL,
+
+
+    computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uniq_session_entity (session_id, entity_type, entity_id),
+    INDEX idx_session_do_now (session_id, do_now_score),
+    INDEX idx_session_do_soon (session_id, do_soon_score),
+    INDEX idx_session_trip_important (session_id, trip_important_score)
+);
+
+
+________________
+
+
+PART 3 — NORMALIZATION RULES
+Every score must be normalized to:
+0.0000 → 1.0000
+
+
+Standard normalization rule:
+normalized_score = clamp(raw_value, 0, 1)
+
+
+Level conversion rule (0–5 to 0–1):
+normalized_score = level / 5.0
+
+
+Reverse density rule:
+For fields like substitution density:
+trip_uniqueness_score = 1 - (substitution_density_level / 5.0)
+
+
+________________
+
+
+PART 4 — BATCH POPULATION SPEC
+Now let’s define exactly how to populate the priors.
+________________
+
+
+4.1 Populate trip_anchor_importance_score
+Source
+This should come from your Structural Importance Engine.
+Assuming you already have:
+* entity_structural_scores.structural_importance_score
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_anchor_importance_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    structural_importance_score
+FROM entity_structural_scores
+ON DUPLICATE KEY UPDATE
+    trip_anchor_importance_score = VALUES(trip_anchor_importance_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.2 Populate trip_regret_risk_score
+This should represent:
+“How likely is the traveler to regret missing this?”
+Recommended formula
+trip_regret_risk_score =
+0.40 * landmark_score
++ 0.30 * iconic_score
++ 0.30 * popularity_score
+
+
+If you don’t have all 3, use your available proxies.
+Assumed source columns
+From your entity master / aggregated entity table:
+* landmark_level
+* popularity_score
+* iconic_score
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_regret_risk_score
+)
+SELECT
+    em.entity_type,
+    em.entity_id,
+    LEAST(
+        1.0,
+        (0.40 * COALESCE(em.landmark_score, 0)) +
+        (0.30 * COALESCE(em.iconic_score, 0)) +
+        (0.30 * COALESCE(em.popularity_score, 0))
+    ) AS trip_regret_risk_score
+FROM entity_master em
+ON DUPLICATE KEY UPDATE
+    trip_regret_risk_score = VALUES(trip_regret_risk_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.3 Populate trip_uniqueness_score
+Logic
+trip_uniqueness_score = 1 - substitution_density_score
+
+
+If using 0–5 density level:
+trip_uniqueness_score = 1 - (substitution_density_level / 5.0)
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_uniqueness_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(1 - (COALESCE(substitution_density_level, 5) / 5.0), 4) AS trip_uniqueness_score
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    trip_uniqueness_score = VALUES(trip_uniqueness_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.4 Populate trip_logistics_dependency_score
+Formula
+trip_logistics_dependency_score =
+0.35 * reservation_need_score
++ 0.30 * schedule_dependency_score
++ 0.20 * transit_dependency_score
++ 0.15 * coordination_need_score
+
+
+If coordination_need_level does not exist, omit or add later.
+Current recommended simplified formula
+trip_logistics_dependency_score =
+0.45 * reservation_need_level_norm
++ 0.35 * schedule_dependency_level_norm
++ 0.20 * transit_dependency_level_norm
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_logistics_dependency_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(
+        (0.45 * (COALESCE(reservation_need_level, 0) / 5.0)) +
+        (0.35 * (COALESCE(schedule_dependency_level, 0) / 5.0)) +
+        (0.20 * (COALESCE(transit_dependency_level, 0) / 5.0)),
+        4
+    ) AS trip_logistics_dependency_score
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    trip_logistics_dependency_score = VALUES(trip_logistics_dependency_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.5 Populate trip_deadline_risk_score
+Formula
+trip_deadline_risk_score =
+0.50 * scarcity_score
++ 0.50 * time_window_strength_score
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_deadline_risk_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(
+        (0.50 * (COALESCE(scarcity_level, 0) / 5.0)) +
+        (0.50 * (COALESCE(time_window_strength_level, 0) / 5.0)),
+        4
+    ) AS trip_deadline_risk_score
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    trip_deadline_risk_score = VALUES(trip_deadline_risk_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.6 Populate trip_planning_relevance_score
+Formula
+trip_planning_relevance_score = planning_relevance_level / 5.0
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    trip_planning_relevance_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(COALESCE(planning_relevance_level, 0) / 5.0, 4)
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    trip_planning_relevance_score = VALUES(trip_planning_relevance_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.7 Populate base_booking_urgency_score
+Formula
+base_booking_urgency_score =
+0.50 * reservation_need_level_norm
++ 0.30 * scarcity_level_norm
++ 0.20 * schedule_dependency_level_norm
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    base_booking_urgency_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(
+        (0.50 * (COALESCE(reservation_need_level, 0) / 5.0)) +
+        (0.30 * (COALESCE(scarcity_level, 0) / 5.0)) +
+        (0.20 * (COALESCE(schedule_dependency_level, 0) / 5.0)),
+        4
+    )
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    base_booking_urgency_score = VALUES(base_booking_urgency_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.8 Populate base_time_window_strength_score
+Formula
+base_time_window_strength_score = time_window_strength_level / 5.0
+
+
+SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    base_time_window_strength_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(COALESCE(time_window_strength_level, 0) / 5.0, 4)
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    base_time_window_strength_score = VALUES(base_time_window_strength_score),
+    updated_at = NOW();
+
+
+________________
+
+
+4.9 Populate effort_level_score
+Important
+This should be reversed so that:
+* low effort = high score
+* high effort = low score
+Formula
+effort_level_score = 1 - ((effort_level - 1) / 4.0)
+
+
+Examples:
+effort_level
+	effort_level_score
+	1
+	1.00
+	2
+	0.75
+	3
+	0.50
+	4
+	0.25
+	5
+	0.00
+	SQL
+INSERT INTO entity_action_horizon_priors (
+    entity_type,
+    entity_id,
+    effort_level_score
+)
+SELECT
+    entity_type,
+    entity_id,
+    ROUND(
+        CASE
+            WHEN effort_level IS NULL THEN 0.50
+            ELSE 1 - ((effort_level - 1) / 4.0)
+        END,
+        4
+    )
+FROM entity_horizon_metadata
+ON DUPLICATE KEY UPDATE
+    effort_level_score = VALUES(effort_level_score),
+    updated_at = NOW();
+
+
+________________
+
+
+PART 5 — RUNTIME COMPUTATION SPEC
+This is where the engine becomes useful.
+At runtime, you compute horizon scores for a candidate set.
+________________
+
+
+RUNTIME INPUTS REQUIRED
+Your Action Horizon runtime scorer should receive:
+$context = [
+    'session_id' => 'abc123',
+    'local_datetime' => '2026-04-04 17:20:00',
+    'daypart' => 'sunset', // sunrise/morning/midday/afternoon/sunset/evening/night
+    'weather_code' => 'clear', // clear/cloudy/rainy/windy/hot/cold
+    'distance_meters' => [... per candidate ...],
+    'detour_minutes' => [... per candidate ...],
+    'current_anchor_entity_type' => 'sight',
+    'current_anchor_entity_id' => 123,
+    'trip_stage' => 'mid_trip', // arrival/mid_trip/departure
+    'energy_state' => 'medium', // low/medium/high
+    'minutes_to_open' => [... per candidate ...],
+    'is_open_now' => [... per candidate ...],
+    'weather_block_flag' => 0,
+    'access_block_flag' => 0,
+    'safety_flag' => 0
+];
+
+
+________________
+
+
+PART 6 — RUNTIME FEATURE CALCULATION
+Now let’s define the exact formulas for each runtime field.
+________________
+
+
+6.1 open_now_score
+Formula
+if is_open_now = 1 → 1.00
+else if minutes_to_open <= 30 → 0.80
+else if minutes_to_open <= 120 → 0.55
+else if opens later today → 0.30
+else → 0.15
+
+
+SQL pattern
+CASE
+    WHEN is_open_now = 1 THEN 1.00
+    WHEN minutes_to_open BETWEEN 0 AND 30 THEN 0.80
+    WHEN minutes_to_open BETWEEN 31 AND 120 THEN 0.55
+    WHEN minutes_to_open > 120 THEN 0.30
+    ELSE 0.15
+END
+
+
+________________
+
+
+6.2 immediate_time_fit_score
+Logic
+Pull current daypart score from entity_time_affinity.
+Example SQL
+If current daypart = sunset:
+SELECT
+    COALESCE(sunset_score, 0.50) AS immediate_time_fit_score
+FROM entity_time_affinity
+WHERE entity_type = :entity_type
+  AND entity_id = :entity_id;
+
+
+Fallback default:
+0.50
+
+
+________________
+
+
+6.3 immediate_weather_fit_score
+Logic
+Pull current weather affinity.
+If weather = rainy:
+SELECT
+    COALESCE(rainy_score, 0.50) AS immediate_weather_fit_score
+FROM entity_weather_affinity
+WHERE entity_type = :entity_type
+  AND entity_id = :entity_id;
+
+
+Fallback default:
+0.50
+
+
+________________
+
+
+6.4 immediate_queue_risk_score
+Logic
+Use expected queue / crowd estimate if available.
+If not, default to:
+0.65
+
+
+Formula
+<=10 min queue → 1.00
+<=25 min → 0.75
+<=45 min → 0.50
+<=90 min → 0.25
+>90 min → 0.10
+
+
+________________
+
+
+6.5 immediate_accessibility_score
+Formula
+immediate_accessibility_score =
+0.40 * transport_access_score
++ 0.30 * entry_ease_score
++ 0.30 * route_feasibility_score
+
+
+If you do not yet have those sub-components, use this simplified proxy:
+immediate_accessibility_score =
+0.60 * immediate_distance_fit_score
++ 0.40 * open_now_score
+
+
+Recommended simplified runtime formula
+immediate_accessibility_score =
+(0.60 * immediate_distance_fit_score)
++ (0.40 * open_now_score)
+
+
+________________
+
+
+6.6 immediate_energy_fit_score
+Inputs
+* energy_state
+* effort_level_score
+Formula
+If energy_state = low
+immediate_energy_fit_score = effort_level_score
+
+
+If energy_state = medium
+immediate_energy_fit_score = 0.80 + (0.20 * effort_level_score)
+
+
+If energy_state = high
+immediate_energy_fit_score = 0.60 + (0.40 * (1 - ABS(0.50 - effort_level_score)))
+
+
+Simpler production-safe version
+low energy   → use effort_level_score directly
+medium energy → clamp(0.70 + 0.30 * effort_level_score)
+high energy  → 0.75 fixed default unless later modeled better
+
+
+Recommended first implementation
+if ($energyState === 'low') {
+    $immediateEnergyFitScore = $effortLevelScore;
+} elseif ($energyState === 'medium') {
+    $immediateEnergyFitScore = min(1, 0.70 + (0.30 * $effortLevelScore));
+} else {
+    $immediateEnergyFitScore = 0.75;
+}
+
+
+________________
+
+
+6.7 immediate_distance_fit_score
+Formula
+<= 400m   → 1.00
+<= 1000m  → 0.85
+<= 2500m  → 0.60
+<= 5000m  → 0.35
+> 5000m   → 0.15
+
+
+SQL
+CASE
+    WHEN distance_meters <= 400 THEN 1.00
+    WHEN distance_meters <= 1000 THEN 0.85
+    WHEN distance_meters <= 2500 THEN 0.60
+    WHEN distance_meters <= 5000 THEN 0.35
+    ELSE 0.15
+END
+
+
+________________
+
+
+6.8 immediate_booking_urgency_score
+Formula
+immediate_booking_urgency_score =
+0.70 * base_booking_urgency_score
++ 0.30 * time_proximity_pressure
+
+
+Example time_proximity_pressure
+if deadline within 3h → 1.00
+within 12h → 0.80
+within 24h → 0.60
+within 48h → 0.35
+else → 0.15
+
+
+If you don’t yet have real deadlines, use:
+immediate_booking_urgency_score = base_booking_urgency_score
+
+
+That is a good V1.
+________________
+
+
+PART 7 — DO SOON FEATURE CALCULATION
+________________
+
+
+7.1 upcoming_time_window_score
+Formula
+upcoming_time_window_score =
+base_time_window_strength_score × temporal_proximity_factor
+
+
+temporal_proximity_factor
+ideal window starts in <= 1h  → 1.00
+<= 3h → 0.80
+<= 6h → 0.55
+tomorrow → 0.30
+later → 0.10
+
+
+If no future window exists:
+0.20
+
+
+________________
+
+
+7.2 upcoming_booking_deadline_score
+Formula
+within 3h  → 1.00
+within 12h → 0.85
+within 24h → 0.70
+within 48h → 0.45
+else → 0.15
+
+
+If you don’t yet have explicit deadline data:
+upcoming_booking_deadline_score = base_booking_urgency_score
+
+
+That is acceptable for V1.
+________________
+
+
+7.3 upcoming_weather_opportunity_score
+Formula
+upcoming_weather_opportunity_score =
+future_weather_fit_score × future_weather_proximity_factor
+
+
+Example
+If sunset clear-sky window is 2 hours away:
+* future_weather_fit_score = 0.95
+* future_weather_proximity_factor = 0.80
+Then:
+0.76
+
+
+If you do not yet have forecast window modeling:
+upcoming_weather_opportunity_score = immediate_weather_fit_score
+
+
+This is acceptable for V1.
+________________
+
+
+7.4 upcoming_sequence_fit_score
+Logic
+Pull from entity_transition_scores.
+SQL
+SELECT
+    COALESCE(transition_score, 0.50) AS upcoming_sequence_fit_score
+FROM entity_transition_scores
+WHERE from_entity_type = :current_anchor_entity_type
+  AND from_entity_id = :current_anchor_entity_id
+  AND to_entity_type = :candidate_entity_type
+  AND to_entity_id = :candidate_entity_id;
+
+
+Fallback default:
+0.50
+
+
+________________
+
+
+7.5 upcoming_route_fit_score
+Formula
+detour <= 5 min  → 1.00
+<= 10 min → 0.85
+<= 20 min → 0.60
+<= 35 min → 0.30
+> 35 min → 0.10
+
+
+SQL
+CASE
+    WHEN detour_minutes <= 5 THEN 1.00
+    WHEN detour_minutes <= 10 THEN 0.85
+    WHEN detour_minutes <= 20 THEN 0.60
+    WHEN detour_minutes <= 35 THEN 0.30
+    ELSE 0.10
+END
+
+
+________________
+
+
+7.6 upcoming_trip_stage_fit_score
+Formula
+Use rule-based scoring.
+________________
+
+
+If trip_stage = arrival
+Entity Pattern
+	Score
+	nearby / low-effort / orientation
+	0.90
+	dinner / essentials / easy walk
+	0.85
+	hard logistics / far detour
+	0.35
+	________________
+
+
+If trip_stage = mid_trip
+Entity Pattern
+	Score
+	major anchors
+	0.90
+	route-compatible clusters
+	0.85
+	filler
+	0.50
+	________________
+
+
+If trip_stage = departure
+Entity Pattern
+	Score
+	short, meaningful, easy
+	0.90
+	airport-compatible
+	0.85
+	full-day heavy item
+	0.20
+	First implementation recommendation
+Use a simplified heuristic:
+arrival:
+    low effort + nearby = high
+
+
+mid_trip:
+    structural importance + route fit = high
+
+
+departure:
+    low effort + high regret = high
+
+
+Suggested formula
+upcoming_trip_stage_fit_score =
+CASE trip_stage
+  arrival   → 0.60 * effort_level_score + 0.40 * immediate_distance_fit_score
+  mid_trip  → 0.60 * trip_anchor_importance_score + 0.40 * upcoming_route_fit_score
+  departure → 0.50 * effort_level_score + 0.50 * trip_regret_risk_score
+END
+
+
+________________
+
+
+PART 8 — FINAL HORIZON FORMULAS
+Now we compute the final outputs.
+________________
+
+
+8.1 DO NOW
+Base formula
+do_now_score =
+(
+  0.18 * open_now_score
++ 0.15 * immediate_time_fit_score
++ 0.10 * immediate_weather_fit_score
++ 0.08 * immediate_queue_risk_score
++ 0.12 * immediate_accessibility_score
++ 0.10 * immediate_energy_fit_score
++ 0.12 * immediate_distance_fit_score
++ 0.15 * immediate_booking_urgency_score
+)
+× do_now_gating_factor
+
+
+________________
+
+
+do_now_gating_factor
+Formula
+do_now_gating_factor =
+availability_gate × degradation_gate × hard_block_gate
+
+
+availability_gate
+availability_gate = max(0.15, open_now_score)
+
+
+degradation_gate
+degradation_gate =
+1
+- (0.35 * weather_block_flag)
+- (0.35 * access_block_flag)
+- (0.30 * safety_flag)
+
+
+Clamp to:
+0.0 → 1.0
+
+
+hard_block_gate
+if permanently_closed OR impossible_now = 1 → 0
+else → 1
+
+
+________________
+
+
+8.2 DO SOON
+Base formula
+do_soon_score =
+(
+  0.22 * upcoming_time_window_score
++ 0.18 * upcoming_booking_deadline_score
++ 0.15 * upcoming_weather_opportunity_score
++ 0.18 * upcoming_sequence_fit_score
++ 0.15 * upcoming_route_fit_score
++ 0.12 * upcoming_trip_stage_fit_score
+)
+× do_soon_gating_factor
+
+
+________________
+
+
+do_soon_gating_factor
+Formula
+do_soon_gating_factor =
+future_viability_gate × degradation_gate × hard_block_gate
+
+
+future_viability_gate
+usable within 24h → 1.00
+within 48h → 0.70
+later in trip only → 0.40
+unlikely usable → 0.10
+
+
+________________
+
+
+8.3 TRIP IMPORTANT
+Base formula
+trip_important_score =
+(
+  0.28 * trip_anchor_importance_score
++ 0.22 * trip_regret_risk_score
++ 0.14 * trip_uniqueness_score
++ 0.14 * trip_logistics_dependency_score
++ 0.12 * trip_deadline_risk_score
++ 0.10 * trip_planning_relevance_score
+)
+× trip_important_gating_factor
+
+
+________________
+
+
+trip_important_gating_factor
+Formula
+trip_important_gating_factor =
+0.85 + (0.15 * future_viability_score)
+
+
+Then apply only true hard death conditions:
+if permanently_closed = 1 → 0
+else keep score
+
+
+Do not heavily penalize “closed now.”
+That would defeat the point of trip-level importance.
+________________
+
+
+PART 9 — RUNTIME INSERT / UPSERT FLOW
+At runtime:
+1. build candidate set
+2. join priors
+3. compute dynamic fields
+4. compute 3 horizon scores
+5. store in session_entity_action_horizon_scores
+________________
+
+
+Example SQL insert pattern
+INSERT INTO session_entity_action_horizon_scores (
+    session_id,
+    entity_type,
+    entity_id,
+
+
+    open_now_score,
+    immediate_time_fit_score,
+    immediate_weather_fit_score,
+    immediate_queue_risk_score,
+    immediate_accessibility_score,
+    immediate_energy_fit_score,
+    immediate_distance_fit_score,
+    immediate_booking_urgency_score,
+
+
+    upcoming_time_window_score,
+    upcoming_booking_deadline_score,
+    upcoming_weather_opportunity_score,
+    upcoming_sequence_fit_score,
+    upcoming_route_fit_score,
+    upcoming_trip_stage_fit_score,
+
+
+    trip_anchor_importance_score,
+    trip_regret_risk_score,
+    trip_uniqueness_score,
+    trip_logistics_dependency_score,
+    trip_deadline_risk_score,
+    trip_planning_relevance_score,
+
+
+    do_now_score,
+    do_soon_score,
+    trip_important_score
+)
+VALUES (
+    :session_id,
+    :entity_type,
+    :entity_id,
+
+
+    :open_now_score,
+    :immediate_time_fit_score,
+    :immediate_weather_fit_score,
+    :immediate_queue_risk_score,
+    :immediate_accessibility_score,
+    :immediate_energy_fit_score,
+    :immediate_distance_fit_score,
+    :immediate_booking_urgency_score,
+
+
+    :upcoming_time_window_score,
+    :upcoming_booking_deadline_score,
+    :upcoming_weather_opportunity_score,
+    :upcoming_sequence_fit_score,
+    :upcoming_route_fit_score,
+    :upcoming_trip_stage_fit_score,
+
+
+    :trip_anchor_importance_score,
+    :trip_regret_risk_score,
+    :trip_uniqueness_score,
+    :trip_logistics_dependency_score,
+    :trip_deadline_risk_score,
+    :trip_planning_relevance_score,
+
+
+    :do_now_score,
+    :do_soon_score,
+    :trip_important_score
+)
+ON DUPLICATE KEY UPDATE
+    open_now_score = VALUES(open_now_score),
+    immediate_time_fit_score = VALUES(immediate_time_fit_score),
+    immediate_weather_fit_score = VALUES(immediate_weather_fit_score),
+    immediate_queue_risk_score = VALUES(immediate_queue_risk_score),
+    immediate_accessibility_score = VALUES(immediate_accessibility_score),
+    immediate_energy_fit_score = VALUES(immediate_energy_fit_score),
+    immediate_distance_fit_score = VALUES(immediate_distance_fit_score),
+    immediate_booking_urgency_score = VALUES(immediate_booking_urgency_score),
+
+
+    upcoming_time_window_score = VALUES(upcoming_time_window_score),
+    upcoming_booking_deadline_score = VALUES(upcoming_booking_deadline_score),
+    upcoming_weather_opportunity_score = VALUES(upcoming_weather_opportunity_score),
+    upcoming_sequence_fit_score = VALUES(upcoming_sequence_fit_score),
+    upcoming_route_fit_score = VALUES(upcoming_route_fit_score),
+    upcoming_trip_stage_fit_score = VALUES(upcoming_trip_stage_fit_score),
+
+
+    trip_anchor_importance_score = VALUES(trip_anchor_importance_score),
+    trip_regret_risk_score = VALUES(trip_regret_risk_score),
+    trip_uniqueness_score = VALUES(trip_uniqueness_score),
+    trip_logistics_dependency_score = VALUES(trip_logistics_dependency_score),
+    trip_deadline_risk_score = VALUES(trip_deadline_risk_score),
+    trip_planning_relevance_score = VALUES(trip_planning_relevance_score),
+
+
+    do_now_score = VALUES(do_now_score),
+    do_soon_score = VALUES(do_soon_score),
+    trip_important_score = VALUES(trip_important_score),
+    computed_at = NOW();
+
+
+________________
+
+
+PART 10 — NIGHTLY / BATCH JOB ORDER
+This is the correct population order.
+________________
+
+
+Nightly Job Sequence
+Step 1
+Populate / refresh:
+* entity_horizon_metadata
+Step 2
+Populate / refresh:
+* entity_time_affinity
+* entity_weather_affinity
+Step 3
+Populate / refresh:
+* entity_transition_scores
+Step 4
+Populate / refresh:
+* entity_action_horizon_priors
+In this exact order.
+________________
+
+
+PART 11 — HOW TO USE IN FEED RANKING
+Do not use only one of these scores.
+Best practice is:
+________________
+
+
+Feed blend
+final_feed_score =
+0.30 * eligibility_score
++ 0.22 * structural_importance_score
++ 0.18 * opportunity_score
++ 0.15 * do_now_score
++ 0.08 * do_soon_score
++ 0.07 * trip_important_score
+
+
+________________
+
+
+Better feed orchestration (recommended)
+Use slot quotas:
+* 35% = high do_now
+* 25% = high do_soon
+* 25% = high trip_important
+* 15% = wildcard / serendipity / exploration
+That produces much better travel-feed behavior.
+________________
+
+
+PART 12 — RECOMMENDED LARAVEL IMPLEMENTATION
+You should build this as:
+Service
+App\Services\Feed\ActionHorizonEngineService
+
+
+Main methods
+computeSessionHorizonScores(string $sessionId, Collection $candidates, array $context)
+computeCandidateHorizon(array $candidate, array $context)
+upsertSessionHorizonScores(array $rows)
+
+
+________________
+
+
+PART 13 — MINIMUM V1 IMPLEMENTATION
+If you want to launch fast, your minimum viable version only needs:
+Required static tables
+* entity_action_horizon_priors
+* entity_time_affinity
+* entity_weather_affinity
+* entity_horizon_metadata
+Required runtime table
+* session_entity_action_horizon_scores
+Required runtime fields
+* open_now_score
+* immediate_time_fit_score
+* immediate_weather_fit_score
+* immediate_distance_fit_score
+* upcoming_time_window_score
+* upcoming_sequence_fit_score
+* upcoming_route_fit_score
+* all trip-important priors
+That’s enough for a strong V1.
+________________
+
+
+FINAL RECOMMENDATION
+Best production implementation
+Build Action Horizon Engine in this order:
+Phase 1
+* static priors
+* runtime horizon scores
+* horizon outputs
+Phase 2
+* better route fit
+* better transition modeling
+* booking deadlines
+* weather windows
+Phase 3
+* user energy modeling
+* queue prediction
+* trip-stage refinement
+* richer opportunity integration
+________________
+
+
+If you want, I can now do the next implementation layer:
+Action Horizon Engine — Laravel Service + SQL Query Builder Spec
+That would include:
+* exact Laravel service class structure
+* methods
+* candidate joins
+* how to compute scores inside your feed pipeline
+* how to integrate it with your current explore/feed architecture
+That would make it directly buildable into your codebase.

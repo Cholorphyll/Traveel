@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use App\Services\ItineraryGenerator;
 use App\Services\TouristFeedEngine;
+use App\Services\AlgoFeed\AlgoFeedEngine;
 use Illuminate\Support\Facades\Log;
 
 class ExploreController extends Controller
@@ -1003,103 +1004,87 @@ class ExploreController extends Controller
                     ->where('r.Averagerating', '>=', 4)
                     ->get();
                 
-                // Initialize TouristFeedEngine
-                $feedEngine = new TouristFeedEngine($locationID, $tourismScore);
+                // ── Build context for AlgoFeedEngine ─────────────────────────
+                $algoContext = [
+                    'user_lat'             => $feedContext['user_lat']  ?? null,
+                    'user_lon'             => $feedContext['user_lon']  ?? null,
+                    'weather_type'         => $feedContext['weather']   ?? 'clear',
+                    'local_time'           => now()->format('H:i:s'),
+                    'local_date'           => now()->format('Y-m-d'),
+                    'temperature_c'        => is_array($currentWeather) ? ($currentWeather['temp_c']    ?? 22)  : 22,
+                    'feels_like_c'         => is_array($currentWeather) ? ($currentWeather['feelslike_c'] ?? 22) : 22,
+                    'humidity'             => is_array($currentWeather) ? ($currentWeather['humidity']   ?? 50)  : 50,
+                    'wind_speed_kmh'       => is_array($currentWeather) ? ($currentWeather['wind_kph']   ?? 10)  : 10,
+                    'precipitation_mm'     => is_array($currentWeather) ? ($currentWeather['precip_mm']  ?? 0)   : 0,
+                    'is_meal_time'         => $feedContext['is_meal_time'] ?? false,
+                    'user_fatigue_state'   => 'fresh',
+                    'user_hunger_state'    => ($feedContext['is_meal_time'] ?? false) ? 'hungry' : 'normal',
+                    'session_energy_state' => 'active',
+                    'user_id'              => Auth::id() ?? null,
+                    'trip_id'              => null,
+                ];
 
                 if ($debugGeo) {
                     Log::info('GEO_DEBUG feed_inputs', [
-                        'geo_debug_id' => $debugGeoId,
-                        'locationID' => $locationID,
-                        'tourismScore' => $tourismScore,
-                        'sights_count' => is_countable($sights) ? $sights->count() : null,
-                        'experiences_count' => is_countable($experiencesQuery) ? $experiencesQuery->count() : null,
-                        'restaurants_count' => is_countable($restaurants) ? $restaurants->count() : null,
-                        'feed_context' => $feedContext,
+                        'geo_debug_id'       => $debugGeoId,
+                        'locationID'         => $locationID,
+                        'tourismScore'       => $tourismScore,
+                        'algo_context'       => $algoContext,
                     ]);
                 }
-                
-                // Generate optimized feed
+
+                // ── Run AlgoFeedEngine (14-module pipeline) ───────────────────
                 $feedStartedAt = microtime(true);
-                $feedData = $feedEngine->generateFeed(
-                    $sights->toArray(),
-                    $experiencesQuery->toArray(),
-                    $restaurants->toArray(),
-                    $feedContext
-                );
+                $algoEngine    = new AlgoFeedEngine($locationID, $algoContext);
+                $algoResult    = $algoEngine->generate();
+                $feedData      = $algoResult['feed'] ?? [];
 
                 if ($debugGeo) {
-                    $typeCounts = [];
-                    $sample = [];
-                    if (is_array($feedData)) {
-                        foreach ($feedData as $i => $row) {
-                            $t = (is_array($row) && isset($row['type'])) ? (string)$row['type'] : 'unknown';
-                            $typeCounts[$t] = ($typeCounts[$t] ?? 0) + 1;
-                            if ($i < 5) {
-                                $d = (is_array($row) && isset($row['data'])) ? $row['data'] : null;
-                                $entityType = null;
-                                $sightId = null;
-                                $title = null;
-                                $lat = null;
-                                $lon = null;
-
-                                if (is_array($d)) {
-                                    $entityType = $d['entity_type'] ?? null;
-                                    $sightId = $d['SightId'] ?? null;
-                                    $title = $d['Title'] ?? null;
-                                    $lat = $d['Latitude'] ?? null;
-                                    $lon = $d['Longitude'] ?? null;
-                                } elseif (is_object($d)) {
-                                    $entityType = $d->entity_type ?? null;
-                                    $sightId = $d->SightId ?? null;
-                                    $title = $d->Title ?? null;
-                                    $lat = $d->Latitude ?? null;
-                                    $lon = $d->Longitude ?? null;
-                                }
-                                $sample[] = [
-                                    'type' => $t,
-                                    'entity_type' => $entityType,
-                                    'SightId' => $sightId,
-                                    'Title' => $title,
-                                    'Latitude' => $lat,
-                                    'Longitude' => $lon,
-                                ];
-                            }
-                        }
-                    }
-
                     Log::info('GEO_DEBUG feed_generated', [
                         'geo_debug_id' => $debugGeoId,
-                        'duration_ms' => (int) round((microtime(true) - $feedStartedAt) * 1000),
-                        'feed_count' => is_array($feedData) ? count($feedData) : null,
-                        'type_counts' => $typeCounts,
-                        'sample_first_items' => $sample,
+                        'duration_ms'  => (int) round((microtime(true) - $feedStartedAt) * 1000),
+                        'feed_count'   => count($feedData),
+                        'session_id'   => $algoResult['session_id'] ?? null,
+                        'meta'         => $algoResult['meta'] ?? [],
                     ]);
                 }
-                
-                // Store structured feed data for view
+
+                // ── Store structured feed for view ────────────────────────────
                 $structuredFeed = $feedData;
-                
-                // Convert feed data back to flat list for view compatibility
+
+                // ── Convert to flat list for view backward-compatibility ───────
                 $optimizedItinerary = [];
-                foreach ($feedData as $item) {
-                    // Skip transit cards for flat list
-                    if (isset($item['type']) && $item['type'] === 'transit') {
-                        continue;
-                    }
-                    
-                    // Add main item data
-                    if (isset($item['data'])) {
-                        $optimizedItinerary[] = (object)$item['data'];
-                    }
+                foreach ($feedData as $card) {
+                    if (($card['type'] ?? '') === 'transit') continue;
+                    // Map new card shape to legacy object shape expected by view
+                    $optimizedItinerary[] = (object)[
+                        'SightId'        => $card['entity_id']    ?? null,
+                        'Title'          => $card['title']        ?? '',
+                        'Latitude'       => $card['lat']          ?? null,
+                        'Longitude'      => $card['lng']          ?? null,
+                        'Averagerating'  => $card['rating']       ?? null,
+                        'ReviewCount'    => $card['review_count'] ?? 0,
+                        'tier'           => $card['tier']         ?? 4,
+                        'Img1'           => $card['image']        ?? null,
+                        'Slug'           => $card['slug']         ?? null,
+                        'slugid'         => $card['slugid']       ?? null,
+                        'CategoryTitle'  => $card['category']     ?? null,
+                        'MicroSummary'   => $card['short_description'] ?? null,
+                        'entity_type'    => $card['entity_type']  ?? $card['type'] ?? 'sight',
+                        'type'           => $card['type']         ?? 'sight',
+                        'moment_label'   => $card['moment_label_short'] ?? null,
+                        'primary_role'   => $card['primary_role'] ?? null,
+                    ];
                 }
-                
-                Log::info('TouristFeedEngine generated feed', [
+
+                Log::info('AlgoFeedEngine generated feed', [
                     'feedCount' => count($feedData),
-                    'flatCount' => count($optimizedItinerary)
+                    'flatCount' => count($optimizedItinerary),
+                    'session_id'=> $algoResult['session_id'] ?? null,
                 ]);
                 
             } catch (\Exception $e) {
-                Log::error('TouristFeedEngine failed, falling back to ItineraryGenerator: ' . $e->getMessage());
+                Log::error('AlgoFeedEngine failed, falling back to ItineraryGenerator: ' . $e->getMessage());
                 
                 // Fallback to old method
                 $itineraryParams = [

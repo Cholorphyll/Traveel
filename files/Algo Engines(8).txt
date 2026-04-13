@@ -1,0 +1,1440 @@
+﻿MODULE 10 — MOMENT FRAMING ENGINE
+Full SQL / Table / Computation / UX Specification
+________________
+
+
+10.0 PURPOSE
+The Moment Framing Engine converts ranked feed decisions into human-readable “why now” framing.
+It answers:
+“Why is this showing up for me right now?”
+It should explain:
+* why this item fits the current moment
+* why it matters in the user’s current situation
+* what kind of action or mindset it supports
+* how urgently or softly it should be framed
+It does not decide the item itself.
+That has already been decided by earlier modules:
+* Base Relevance
+* Opportunity Engine
+* Action Horizon Engine
+* Role Assignment Engine
+* Route Engine
+* Sequence Planner
+* Slot Ranking Engine
+Moment Framing takes those outputs and transforms them into:
+* moment tags
+* explanation reasons
+* framing intensity
+* CTA style
+* short user-facing labels
+* secondary support reasons
+________________
+
+
+10.1 CORE DESIGN PRINCIPLE
+The system chooses.
+Moments explain.
+That means:
+❌ Wrong architecture:
+“Generate a cute reason for each recommendation.”
+✅ Correct architecture:
+“Use system evidence to derive the strongest explanation pattern.”
+A moment must therefore be:
+* true
+* situational
+* useful
+* specific
+* behaviorally aligned
+* not generic fluff
+________________
+
+
+10.2 WHAT A “MOMENT” REALLY IS
+A moment is a structured explanation layer that combines:
+* user context
+* environment context
+* trip state
+* movement state
+* need state
+* timing
+* social energy
+* opportunity window
+* practical fit
+* emotional framing
+In practice, every recommendation should be frameable as one or more of:
+* Act now
+* Good fit nearby
+* Best at this time
+* Good for your current energy
+* Worth saving for later
+* Good for this practical need
+* Special because of current conditions
+* Worth detouring for
+* Socially alive / active
+* Quiet / restorative / easy
+________________
+
+
+10.3 OUTPUT OF THIS MODULE
+For every feed candidate (or final chosen slot item), this engine should output:
+moment_primary_family
+moment_primary_type
+moment_primary_score
+moment_secondary_type
+moment_secondary_score
+moment_confidence
+moment_urgency_level
+moment_actionability_level
+moment_social_intensity
+moment_energy_fit_level
+moment_need_fit_level
+moment_copy_variant_id
+moment_label_short
+moment_label_medium
+moment_reason_json
+moment_cta_style
+moment_suppress_flag
+moment_fallback_flag
+moment_last_computed_at
+
+
+This becomes the structured basis for UI text.
+________________
+
+
+10.4 ARCHITECTURAL POSITION
+Moment Framing should run after Slot Ranking Engine.
+Pipeline order:
+1. Candidate generation
+2. Relevance scoring
+3. Opportunity scoring
+4. Action Horizon assignment
+5. Role assignment
+6. Route evaluation
+7. Sequence planning
+8. Slot ranking
+9. Moment framing
+10. UI rendering
+This is important because framing should reflect the actual selected reason for surfacing, not pre-rank guesses.
+________________
+
+
+10.5 DATA SOURCES REQUIRED
+Moment Framing is only as good as the evidence feeding it.
+It should consume outputs from these modules/tables:
+Required upstream signals
+* feed_candidate_scores
+* opportunity_scores
+* action_horizon_scores
+* role_assignment_scores
+* route_scores
+* sequence_slot_scores
+* slot_ranking_scores
+Required item attributes
+* category / subcategory
+* indoor / outdoor
+* daypart fit
+* dwell time
+* walking effort
+* queue sensitivity
+* scenic value
+* sunset value
+* nightlife tendency
+* weather suitability
+* food / drink / shopping / attraction type
+* “easy stop” suitability
+* hidden gem / low discoverability score
+* popularity rhythm
+Required live/session context
+* local time
+* daypart
+* weather
+* temperature / feels like
+* rain / wind / UV / humidity
+* route position
+* distance from user
+* distance from current anchor
+* session depth
+* trip day
+* time until sunset
+* time until venue close
+* nearby crowd / liveliness estimate
+* current user energy mode
+* user likely need state
+________________
+
+
+10.6 CORE TABLE DESIGN
+You should store moment framing at the candidate-session level.
+________________
+
+
+TABLE: moment_frame_scores
+CREATE TABLE moment_frame_scores (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id BIGINT NOT NULL,
+    user_id BIGINT NULL,
+    trip_id BIGINT NULL,
+    slot_index INT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+    item_id BIGINT NOT NULL,
+
+
+    moment_primary_family VARCHAR(50) NULL,
+    moment_primary_type VARCHAR(100) NULL,
+    moment_primary_score DECIMAL(8,4) NULL,
+
+
+    moment_secondary_family VARCHAR(50) NULL,
+    moment_secondary_type VARCHAR(100) NULL,
+    moment_secondary_score DECIMAL(8,4) NULL,
+
+
+    moment_confidence DECIMAL(8,4) NULL,
+    moment_urgency_level DECIMAL(8,4) NULL,
+    moment_actionability_level DECIMAL(8,4) NULL,
+    moment_social_intensity DECIMAL(8,4) NULL,
+    moment_energy_fit_level DECIMAL(8,4) NULL,
+    moment_need_fit_level DECIMAL(8,4) NULL,
+
+
+    moment_copy_variant_id VARCHAR(100) NULL,
+    moment_label_short VARCHAR(120) NULL,
+    moment_label_medium VARCHAR(255) NULL,
+    moment_reason_json JSON NULL,
+
+
+    moment_cta_style VARCHAR(50) NULL,
+    moment_suppress_flag TINYINT(1) DEFAULT 0,
+    moment_fallback_flag TINYINT(1) DEFAULT 0,
+
+
+    moment_last_computed_at DATETIME NOT NULL,
+
+
+    UNIQUE KEY uq_session_slot_item (session_id, slot_index, item_type, item_id),
+    INDEX idx_session_slot (session_id, slot_index),
+    INDEX idx_item (item_type, item_id),
+    INDEX idx_primary_type (moment_primary_type),
+    INDEX idx_primary_family (moment_primary_family)
+);
+
+
+________________
+
+
+10.7 REQUIRED FIELDS — FULL EXPLANATION
+Now let’s define each field properly.
+________________
+
+
+10.7.1 moment_primary_family
+Purpose
+The top-level explanation family.
+This is the main bucket of “why this matters right now.”
+Allowed values
+IMMEDIATE_ACTION
+SOCIAL_ENERGY
+OPPORTUNITY
+DISCOVERY
+PLANNING_GUIDANCE
+NEED_STATE
+RECOVERY
+TRANSITION
+ANCHOR_REINFORCEMENT
+
+
+You initially proposed 6 families — that’s good.
+But in production, you should also add:
+* RECOVERY → for cool-down, sit-down, low-friction reset moments
+* TRANSITION → for “on the way”, “good next stop”, “fits between anchors”
+* ANCHOR_REINFORCEMENT → for “this is why this anchor matters”
+These will become very important in travel feeds.
+Population logic
+Choose the family with highest moment family score.
+moment_primary_family = argmax(
+    immediate_action_score,
+    social_energy_score,
+    opportunity_moment_score,
+    discovery_moment_score,
+    planning_guidance_score,
+    need_state_score,
+    recovery_score,
+    transition_score,
+    anchor_reinforcement_score
+)
+
+
+________________
+
+
+10.7.2 moment_primary_type
+Purpose
+The specific moment explanation, not just the family.
+This is what powers UI labels like:
+* Right here right now
+* Good quick lunch nearby
+* Better after sunset
+* Great before it gets hot
+* Worth a short detour
+* Lively around now
+* Good stop between bigger sights
+This should be a controlled enum — not free text.
+________________
+
+
+Suggested enum catalog
+________________
+
+
+A) IMMEDIATE_ACTION
+RIGHT_HERE_RIGHT_NOW
+SHORT_EASY_STOP_NEARBY
+GOOD_IF_YOU_HAVE_20_MINUTES
+QUICK_BREAK_STOP
+EASY_ADD_ON_STOP
+LOW_COMMITMENT_DETOUR
+
+
+B) SOCIAL_ENERGY
+LIVELY_RIGHT_NOW
+BUSY_AFTER_7PM
+PEOPLE_ARE_HERE_NOW
+GOOD_SOCIAL_SCENE
+EVENING_BUZZ
+LOCALS_LIKE_THIS_TIME
+
+
+C) OPPORTUNITY
+BEST_BEFORE_SUNSET
+BEST_AFTER_SUNSET
+GREAT_WHEN_HEAT_DROPS
+GOOD_WHILE_WEATHER_HOLDS
+CATCH_BEFORE_IT_CLOSES
+LOW_QUEUE_RIGHT_NOW
+BEST_IN_CURRENT_CONDITIONS
+
+
+D) DISCOVERY
+HIDDEN_GEM_NEARBY
+WORTH_A_SHORT_RIDE
+EASY_TO_MISS_BUT_WORTH_IT
+TUCKED_AWAY_FIND
+BETTER_THAN_IT_LOOKS
+QUIET_DISCOVERY_STOP
+
+
+E) PLANNING_GUIDANCE
+SAVE_FOR_TOMORROW
+BETTER_EARLIER_IN_DAY
+DONOT_MISS_THIS_ZONE
+PAIR_WITH_NEARBY_ANCHOR
+GOOD_LATER_STOP
+BETTER_AS_A_PLANNED_VISIT
+
+
+F) NEED_STATE
+CASUAL_LUNCH_NEARBY
+GOOD_DINNER_NEARBY
+QUICK_BITE_NEARBY
+COOL_INDOOR_BREAK
+REST_STOP_NEARBY
+COFFEE_RESET_STOP
+SIT_DOWN_AND_RECOVER
+RAIN_SAFE_OPTION
+FAMILY_FRIENDLY_BREAK
+
+
+G) RECOVERY
+LOW_EFFORT_RECOVERY
+GOOD_AFTER_HEAVY_WALKING
+SHADED_BREAK_STOP
+SEATED_RESET
+SLOW_THE_PACE_HERE
+
+
+H) TRANSITION
+GOOD_NEXT_STOP
+ON_THE_WAY_WORTH_STOPPING
+FITS_BETWEEN_ANCHORS
+SMOOTH_ROUTE_CONTINUATION
+NEAR_YOUR_CURRENT_PATH
+
+
+I) ANCHOR_REINFORCEMENT
+WORTH_BUILDING_AROUND
+KEY_STOP_IN_THIS_AREA
+ONE_OF_THE_MAIN_REASONS_TO_BE_HERE
+DEFINING_STOP_FOR_THIS_ZONE
+
+
+________________
+
+
+Population logic
+This is selected from the highest-scoring moment type under the winning family.
+moment_primary_type = argmax(moment_type_scores within chosen family)
+
+
+________________
+
+
+10.7.3 moment_primary_score
+Purpose
+Strength of the top moment explanation.
+This is not overall item quality.
+It is:
+How strongly can this item be framed as this specific moment right now?
+Range
+0.0000 – 1.0000
+
+
+Formula
+Use weighted evidence aggregation:
+moment_primary_score =
+(
+  contextual_fit * 0.30 +
+  timing_fit * 0.20 +
+  route_fit * 0.15 +
+  need_fit * 0.15 +
+  opportunity_fit * 0.10 +
+  social_fit * 0.05 +
+  confidence_support * 0.05
+)
+
+
+You can tune weights by family.
+________________
+
+
+10.7.4 moment_secondary_family
+10.7.5 moment_secondary_type
+10.7.6 moment_secondary_score
+Purpose
+Many items deserve two truths, not one.
+Example:
+* “Quick indoor break”
+* “Good while the heat is high”
+Or:
+* “Worth a short detour”
+* “Best before sunset”
+This lets UI support:
+* a primary label
+* a supporting reason
+* a richer explanation
+Population logic
+Take the next-best moment family/type if:
+secondary_score >= 0.65
+AND
+secondary_score within 0.15 of primary_score
+AND
+secondary_type not semantically redundant
+
+
+________________
+
+
+10.7.7 moment_confidence
+Purpose
+How confident the system is that this framing is truthful and stable.
+This prevents bad UX like:
+* saying “lively right now” with no real evidence
+* saying “great for sunset” at 2 PM
+* saying “quick stop” for a 90-minute museum
+Formula
+moment_confidence =
+(
+  signal_coverage_score * 0.35 +
+  signal_agreement_score * 0.35 +
+  data_freshness_score * 0.20 +
+  contradiction_penalty_adjusted * 0.10
+)
+
+
+Where:
+A) signal_coverage_score
+How many required signals exist?
+signal_coverage_score = available_required_signals / total_required_signals
+
+
+B) signal_agreement_score
+Do upstream modules agree?
+Example:
+* Opportunity says yes
+* Need-state says yes
+* Route says yes
+* Sequence says yes
+Then confidence should rise.
+C) data_freshness_score
+Live inputs degrade over time.
+D) contradiction_penalty_adjusted
+If the framing conflicts with item reality, confidence drops.
+Example:
+* “quick stop” + dwell_time = 120 min
+* “cool indoor break” + item is outdoor
+* “best before sunset” + sunset value weak
+________________
+
+
+10.7.8 moment_urgency_level
+Purpose
+How much the moment should feel like:
+* do this now
+vs
+* nice to know
+Range
+0–1
+
+
+Formula
+moment_urgency_level =
+(
+  closing_soon_score * 0.35 +
+  time_window_decay_score * 0.30 +
+  current_fit_vs_future_fit_delta * 0.20 +
+  opportunity_expiry_score * 0.15
+)
+
+
+Example:
+High urgency:
+   * closes in 40 min
+   * best only at golden hour
+   * weather window temporary
+Low urgency:
+   * all-day indoor museum
+   * always decent coffee shop
+________________
+
+
+10.7.9 moment_actionability_level
+Purpose
+How easy it is to act on this right now.
+This is very important and underused.
+A recommendation can be relevant but not actable.
+Formula
+moment_actionability_level =
+(
+  proximity_score * 0.30 +
+  route_convenience_score * 0.25 +
+  effort_score * 0.20 +
+  open_now_score * 0.15 +
+  friction_penalty_adjusted * 0.10
+)
+
+
+High examples:
+   * 4 min away
+   * on current route
+   * no reservation needed
+   * easy entry
+Low examples:
+   * 40 min away
+   * uphill
+   * ticketed
+   * currently crowded
+   * requires planning
+________________
+
+
+10.7.10 moment_social_intensity
+Purpose
+Measures whether this moment should be framed as:
+   * lively
+   * popular
+   * energetic
+   * social
+   * atmospheric
+Formula
+moment_social_intensity =
+(
+  live_popularity_score * 0.40 +
+  historical_daypart_crowd_score * 0.25 +
+  nightlife_affinity_score * 0.15 +
+  user_visible_activity_score * 0.10 +
+  review_energy_language_score * 0.10
+)
+
+
+Use this only when confidence is strong enough.
+If weak, suppress social framing entirely.
+________________
+
+
+10.7.11 moment_energy_fit_level
+Purpose
+How well the item matches the user’s current energy state.
+Examples:
+   * after long walking → low effort café / shaded stop scores high
+   * evening social mode → bar / promenade / lively plaza scores high
+   * museum fatigue → scenic open-air pause scores high
+Formula
+moment_energy_fit_level =
+1 - ABS(item_energy_demand - user_current_energy_tolerance)
+
+
+Normalized to 0–1.
+________________
+
+
+10.7.12 moment_need_fit_level
+Purpose
+How well this satisfies the likely practical need right now.
+This is crucial for your Need-State Moments.
+Possible inferred needs:
+   * lunch
+   * dinner
+   * snack
+   * coffee
+   * cool down
+   * restroom vicinity
+   * sit-down
+   * rain shelter
+   * kid-friendly stop
+   * low-energy stop
+   * scenic break
+Formula
+moment_need_fit_level =
+SUM(weighted need match signals)
+
+
+More concretely:
+moment_need_fit_level =
+(
+  explicit_need_match * 0.45 +
+  inferred_need_match * 0.30 +
+  daypart_need_match * 0.15 +
+  context_need_match * 0.10
+)
+
+
+________________
+
+
+10.7.13 moment_copy_variant_id
+Purpose
+Separates decision logic from surface wording.
+Do not generate copy directly from raw scores.
+Instead:
+   * choose a structured moment type
+   * then map it to copy variants
+Example:
+moment_primary_type = COOL_INDOOR_BREAK
+moment_copy_variant_id = NEED_COOL_INDOOR_BREAK_V2
+
+
+This lets you:
+   * A/B test labels
+   * localize later
+   * keep consistent UX tone
+   * avoid chaotic phrasing
+________________
+
+
+10.7.14 moment_label_short
+Purpose
+Tiny UI label (mobile chips, badges, pill text)
+Examples:
+   * Good right now
+   * Cool indoor break
+   * Great before sunset
+   * Quick lunch nearby
+   * Worth the detour
+   * Lively now
+Rules
+   * 2–5 words ideal
+   * must be instantly understandable
+   * must never be vague fluff
+________________
+
+
+10.7.15 moment_label_medium
+Purpose
+Slightly richer supporting label.
+Examples:
+   * Great stop before sunset
+   * Easy indoor break nearby
+   * Good dinner option in this area
+   * Worth a short ride from here
+   * Better once the heat drops
+Used for:
+   * card sublabels
+   * hover details
+   * feed explanation lines
+________________
+
+
+10.7.16 moment_reason_json
+Purpose
+Stores the actual evidence behind the moment.
+This is extremely important.
+Without this, you cannot:
+   * debug bad moments
+   * explain why a frame was chosen
+   * improve ranking trust
+   * audit hallucinated UX logic
+________________
+
+
+Example JSON
+{
+  "primary_driver": "need_state_match",
+  "secondary_driver": "heat_relief",
+  "signals": {
+    "distance_minutes": 4,
+    "indoor_outdoor": "indoor",
+    "temperature_c": 34,
+    "open_now": true,
+    "current_daypart": "afternoon",
+    "route_position": "near_current_path",
+    "dwell_minutes": 25,
+    "user_energy_state": "fatigued",
+    "need_state": "cool_down"
+  },
+  "supporting_modules": {
+    "opportunity_engine": 0.82,
+    "action_horizon_engine": 0.91,
+    "route_engine": 0.88,
+    "sequence_planner": 0.84,
+    "slot_rank_engine": 0.89
+  },
+  "contradictions": [],
+  "suppressed_alternatives": [
+    "LIVELY_RIGHT_NOW"
+  ]
+}
+
+
+________________
+
+
+10.7.17 moment_cta_style
+Purpose
+Determines what kind of action wording to use.
+Suggested enum
+GO_NOW
+GOOD_NEXT
+SAVE_FOR_LATER
+DET0UR_WORTH_IT
+QUICK_STOP
+PLAN_THIS
+OPTIONAL_ADD_ON
+
+
+This is useful because:
+   * a high urgency moment should not say “save for later”
+   * a low-friction nearby stop should not say “plan this”
+________________
+
+
+10.7.18 moment_suppress_flag
+Purpose
+Suppress weak or misleading moment framing.
+Set to 1 when:
+   * confidence too low
+   * moment too generic
+   * no strong situational explanation exists
+   * chosen frame conflicts with item truth
+Example:
+Do not show:
+   * “Good right now”
+   * “Worth visiting”
+   * “Popular stop”
+unless it is genuinely grounded.
+This field protects UX quality.
+________________
+
+
+10.7.19 moment_fallback_flag
+Purpose
+Used when no strong contextual frame exists, and the system falls back to a safer explanation like:
+      * Nearby stop
+      * Good area pick
+      * Useful if you’re around here
+Fallbacks are okay — but should be explicitly marked.
+________________
+
+
+10.8 MOMENT FAMILY SCORE SYSTEM
+Now let’s define how each family is actually scored.
+________________
+
+
+10.8.1 IMMEDIATE ACTION SCORE
+Meaning
+Can this be framed as something easy and relevant to do now?
+Formula
+immediate_action_score =
+(
+  actionability_level * 0.35 +
+  proximity_score * 0.20 +
+  low_commitment_score * 0.15 +
+  open_now_score * 0.15 +
+  sequence_fit_score * 0.10 +
+  route_fit_score * 0.05
+)
+
+
+Strong examples
+      * 5-minute scenic overlook
+      * quick café stop
+      * small museum on current path
+________________
+
+
+10.8.2 SOCIAL ENERGY SCORE
+Meaning
+Is this moment socially active / lively / atmospheric now?
+Formula
+social_energy_score =
+(
+  social_intensity * 0.40 +
+  evening_alignment_score * 0.20 +
+  nightlife_affinity_score * 0.15 +
+  popularity_now_score * 0.15 +
+  visible_activity_score * 0.10
+)
+
+
+Only show if confidence is high.
+________________
+
+
+10.8.3 OPPORTUNITY MOMENT SCORE
+Meaning
+Is there a temporary reason this is especially good right now?
+Formula
+opportunity_moment_score =
+(
+  opportunity_engine_score * 0.40 +
+  urgency_level * 0.20 +
+  current_conditions_advantage * 0.20 +
+  time_window_strength * 0.15 +
+  rarity_of_window_score * 0.05
+)
+
+
+Examples:
+      * before sunset
+      * after heat drops
+      * before close
+      * low queue window
+________________
+
+
+10.8.4 DISCOVERY MOMENT SCORE
+Meaning
+Can this be framed as a rewarding, less-obvious find?
+Formula
+discovery_moment_score =
+(
+  low_discoverability_score * 0.30 +
+  uniqueness_score * 0.20 +
+  hidden_gem_score * 0.20 +
+  detour_worthiness_score * 0.15 +
+  localness_score * 0.10 +
+  low_mass_tourism_penalty_adjusted * 0.05
+)
+
+
+Use carefully.
+Do not call everything a hidden gem.
+________________
+
+
+10.8.5 PLANNING GUIDANCE SCORE
+Meaning
+Is the best framing not “do now” but “remember this smartly”?
+Formula
+planning_guidance_score =
+(
+  future_fit_score * 0.35 +
+  current_actionability_penalty_adjusted * 0.20 +
+  daypart_specificity_score * 0.20 +
+  anchor_pairing_value * 0.15 +
+  tomorrow_relevance_score * 0.10
+)
+
+
+________________
+
+
+10.8.6 NEED STATE SCORE
+Meaning
+Does this satisfy a likely practical or physical need right now?
+Formula
+need_state_score =
+(
+  need_fit_level * 0.45 +
+  current_daypart_need_alignment * 0.20 +
+  recovery_support_score * 0.15 +
+  actionability_level * 0.10 +
+  environmental_relief_score * 0.10
+)
+
+
+This family should become one of your highest-value UX layers.
+Because users often aren’t thinking:
+“Which attraction should I do?”
+They’re thinking:
+“I need lunch / shade / a break / somewhere easy.”
+________________
+
+
+10.8.7 RECOVERY SCORE
+Meaning
+Good for slowing down, cooling off, sitting, or resetting.
+Formula
+recovery_score =
+(
+  low_effort_score * 0.30 +
+  seated_restfulness_score * 0.20 +
+  environmental_relief_score * 0.20 +
+  energy_fit_level * 0.15 +
+  route_ease_score * 0.10 +
+  low_queue_score * 0.05
+)
+
+
+________________
+
+
+10.8.8 TRANSITION SCORE
+Meaning
+This works because it fits between bigger things.
+Formula
+transition_score =
+(
+  route_continuity_score * 0.35 +
+  between_anchor_fit_score * 0.25 +
+  low_detour_score * 0.20 +
+  sequence_bridge_value * 0.10 +
+  movement_convenience_score * 0.10
+)
+
+
+This is extremely useful in itinerary-style feeds.
+________________
+
+
+10.8.9 ANCHOR REINFORCEMENT SCORE
+Meaning
+This is a defining stop that reinforces why this area matters.
+Formula
+anchor_reinforcement_score =
+(
+  anchor_strength_score * 0.35 +
+  area_signature_score * 0.25 +
+  landmark_importance_score * 0.20 +
+  must_do_score * 0.15 +
+  trip_identity_value * 0.05
+)
+
+
+________________
+
+
+10.9 HOW TO DETERMINE moment_primary_type
+This should not be a single formula.
+It should be a rule + score hybrid.
+That means:
+      1. compute family scores
+      2. compute type-specific scores inside each family
+      3. apply eligibility rules
+      4. choose the strongest valid type
+This avoids nonsense like:
+      * “Quick break stop” for a 2-hour palace
+      * “Catch before it closes” for a place open until midnight
+      * “Cool indoor break” for an open-air beach promenade
+________________
+
+
+10.10 TYPE ELIGIBILITY RULES (VERY IMPORTANT)
+Before a moment type can even compete, it should pass hard truth checks.
+________________
+
+
+Example: COOL_INDOOR_BREAK
+Eligibility
+item_indoor = 1
+AND heat_relief_score >= 0.60
+AND dwell_time_minutes <= 90
+AND seated_or_restful_score >= 0.40
+
+
+________________
+
+
+Example: BEST_BEFORE_SUNSET
+Eligibility
+sunset_value_score >= 0.70
+AND minutes_to_sunset BETWEEN 20 AND 150
+AND weather_visibility_score >= 0.50
+
+
+________________
+
+
+Example: CATCH_BEFORE_IT_CLOSES
+Eligibility
+minutes_to_close <= 90
+AND open_now = 1
+AND estimated_visit_possible = 1
+
+
+________________
+
+
+Example: QUICK_BITE_NEARBY
+Eligibility
+category IN ('restaurant','cafe','food_market','bakery')
+AND distance_minutes <= 12
+AND average_dwell_minutes <= 50
+AND open_now = 1
+
+
+________________
+
+
+Example: WORTH_A_SHORT_RIDE
+Eligibility
+distance_minutes BETWEEN 10 AND 30
+AND detour_worthiness_score >= 0.65
+AND route_penalty <= 0.45
+
+
+________________
+
+
+Example: LIVELY_RIGHT_NOW
+Eligibility
+social_intensity >= 0.70
+AND confidence >= 0.70
+AND current_daypart IN ('late_afternoon','evening','night')
+
+
+________________
+
+
+10.11 SUGGESTED SQL SUPPORT TABLES
+To make this implementation-ready, you should not hardcode all moment logic inside PHP.
+Use support tables.
+________________
+
+
+TABLE: moment_type_rules
+CREATE TABLE moment_type_rules (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    moment_family VARCHAR(50) NOT NULL,
+    moment_type VARCHAR(100) NOT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+
+
+    min_proximity_score DECIMAL(8,4) NULL,
+    max_proximity_score DECIMAL(8,4) NULL,
+
+
+    min_actionability_score DECIMAL(8,4) NULL,
+    min_need_fit_score DECIMAL(8,4) NULL,
+    min_social_intensity DECIMAL(8,4) NULL,
+    min_opportunity_score DECIMAL(8,4) NULL,
+    min_energy_fit_score DECIMAL(8,4) NULL,
+    min_hidden_gem_score DECIMAL(8,4) NULL,
+
+
+    requires_open_now TINYINT(1) NULL,
+    requires_indoor TINYINT(1) NULL,
+    requires_outdoor TINYINT(1) NULL,
+    requires_sunset_window TINYINT(1) NULL,
+    requires_closing_window TINYINT(1) NULL,
+    requires_food_category TINYINT(1) NULL,
+    requires_low_commitment TINYINT(1) NULL,
+
+
+    preferred_dayparts JSON NULL,
+    preferred_categories JSON NULL,
+
+
+    priority_weight DECIMAL(8,4) DEFAULT 1.0000,
+
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uq_moment_type (moment_type)
+);
+
+
+This lets you tune behavior without code deployments.
+________________
+
+
+10.12 RECOMMENDED FEATURE TABLE FOR FAST COMPUTATION
+Create a denormalized candidate feature table.
+________________
+
+
+TABLE: moment_candidate_features
+CREATE TABLE moment_candidate_features (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id BIGINT NOT NULL,
+    slot_index INT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+    item_id BIGINT NOT NULL,
+
+
+    current_daypart VARCHAR(50),
+    current_hour INT,
+    minutes_to_sunset INT NULL,
+    minutes_to_close INT NULL,
+
+
+    distance_minutes DECIMAL(8,2) NULL,
+    route_detour_minutes DECIMAL(8,2) NULL,
+    route_continuity_score DECIMAL(8,4) NULL,
+
+
+    temperature_c DECIMAL(5,2) NULL,
+    rain_probability DECIMAL(8,4) NULL,
+    uv_index DECIMAL(8,4) NULL,
+
+
+    open_now TINYINT(1),
+    indoor_outdoor VARCHAR(20),
+    avg_dwell_minutes INT NULL,
+    seated_restfulness_score DECIMAL(8,4) NULL,
+    low_commitment_score DECIMAL(8,4) NULL,
+    scenic_value_score DECIMAL(8,4) NULL,
+    sunset_value_score DECIMAL(8,4) NULL,
+    nightlife_affinity_score DECIMAL(8,4) NULL,
+    hidden_gem_score DECIMAL(8,4) NULL,
+    detour_worthiness_score DECIMAL(8,4) NULL,
+
+
+    user_energy_state VARCHAR(50),
+    user_need_state VARCHAR(50),
+
+
+    proximity_score DECIMAL(8,4) NULL,
+    actionability_score DECIMAL(8,4) NULL,
+    urgency_score DECIMAL(8,4) NULL,
+    need_fit_score DECIMAL(8,4) NULL,
+    social_intensity_score DECIMAL(8,4) NULL,
+    opportunity_score DECIMAL(8,4) NULL,
+    recovery_score DECIMAL(8,4) NULL,
+
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+
+    UNIQUE KEY uq_session_slot_item (session_id, slot_index, item_type, item_id),
+    INDEX idx_session_slot (session_id, slot_index),
+    INDEX idx_item (item_type, item_id)
+);
+
+
+This table is what makes the module actually practical.
+________________
+
+
+10.13 EXAMPLE SQL FEATURE POPULATION
+________________
+
+
+Example: proximity score
+CASE
+    WHEN distance_minutes <= 5 THEN 1.00
+    WHEN distance_minutes <= 10 THEN 0.85
+    WHEN distance_minutes <= 20 THEN 0.65
+    WHEN distance_minutes <= 30 THEN 0.40
+    ELSE 0.15
+END AS proximity_score
+
+
+________________
+
+
+Example: low commitment score
+CASE
+    WHEN avg_dwell_minutes <= 20 THEN 1.00
+    WHEN avg_dwell_minutes <= 40 THEN 0.85
+    WHEN avg_dwell_minutes <= 60 THEN 0.65
+    WHEN avg_dwell_minutes <= 90 THEN 0.40
+    ELSE 0.15
+END AS low_commitment_score
+
+
+________________
+
+
+Example: urgency from closing
+CASE
+    WHEN minutes_to_close IS NULL THEN 0.10
+    WHEN minutes_to_close <= 30 THEN 1.00
+    WHEN minutes_to_close <= 60 THEN 0.85
+    WHEN minutes_to_close <= 90 THEN 0.70
+    WHEN minutes_to_close <= 180 THEN 0.35
+    ELSE 0.10
+END AS closing_soon_score
+
+
+________________
+
+
+Example: heat relief score
+CASE
+    WHEN temperature_c >= 34 AND indoor_outdoor = 'indoor' THEN 1.00
+    WHEN temperature_c >= 31 AND indoor_outdoor = 'indoor' THEN 0.80
+    WHEN temperature_c >= 30 AND seated_restfulness_score >= 0.7 THEN 0.65
+    ELSE 0.10
+END AS heat_relief_score
+
+
+________________
+
+
+10.14 FINAL MOMENT SELECTION QUERY (CONCEPTUAL)
+You likely won’t do this as one monster SQL query in production.
+Better to compute features first, then family scores, then type selection.
+But conceptually:
+SELECT
+    session_id,
+    slot_index,
+    item_type,
+    item_id,
+
+
+    GREATEST(
+        immediate_action_score,
+        social_energy_score,
+        opportunity_moment_score,
+        discovery_moment_score,
+        planning_guidance_score,
+        need_state_score,
+        recovery_score,
+        transition_score,
+        anchor_reinforcement_score
+    ) AS best_moment_score
+FROM moment_family_scores
+WHERE session_id = ?
+AND slot_index = ?;
+
+
+Then map highest valid family → highest valid type.
+________________
+
+
+10.15 MOMENT COPY SYSTEM (VERY IMPORTANT)
+Do not generate all UX text dynamically from scratch.
+Instead create a controlled copy bank.
+________________
+
+
+TABLE: moment_copy_templates
+CREATE TABLE moment_copy_templates (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    moment_type VARCHAR(100) NOT NULL,
+    variant_code VARCHAR(100) NOT NULL,
+    short_label VARCHAR(120) NOT NULL,
+    medium_label VARCHAR(255) NOT NULL,
+    support_line VARCHAR(255) NULL,
+    cta_style VARCHAR(50) NULL,
+    tone VARCHAR(50) NULL,
+    is_active TINYINT(1) DEFAULT 1,
+
+
+    UNIQUE KEY uq_variant_code (variant_code),
+    INDEX idx_moment_type (moment_type)
+);
+
+
+________________
+
+
+Example rows
+moment_type
+	short_label
+	medium_label
+	RIGHT_HERE_RIGHT_NOW
+	Good right now
+	Easy stop from where you are
+	COOL_INDOOR_BREAK
+	Cool indoor break
+	Good indoor break nearby
+	BEST_BEFORE_SUNSET
+	Before sunset
+	Great stop before sunset
+	QUICK_BITE_NEARBY
+	Quick bite nearby
+	Easy food stop in this area
+	WORTH_A_SHORT_RIDE
+	Worth the ride
+	Worth a short ride from here
+	SAVE_FOR_TOMORROW
+	Save for tomorrow
+	Better as a planned stop
+	________________
+
+
+10.16 SUPPRESSION RULES (CRITICAL FOR UX QUALITY)
+This is where most systems fail.
+Not every item should get a strong “moment.”
+Suppress when:
+moment_primary_score < 0.58
+OR moment_confidence < 0.60
+OR chosen type fails truth checks
+OR label would feel generic
+OR primary and secondary reason conflict
+
+
+When suppressed:
+      * show nothing
+      * or show a neutral support label
+Examples of neutral fallback:
+      * Nearby option
+      * Good area pick
+      * Popular in this area
+      * Easy stop around here
+But keep fallback use low.
+________________
+
+
+10.17 RECOMMENDED PHP / LARAVEL COMPUTATION FLOW
+For your stack, this is the cleanest production shape.
+________________
+
+
+Step 1 — Build candidate feature rows
+Create:
+MomentFeatureBuilderService
+
+
+Inputs:
+      * session context
+      * weather
+      * route state
+      * item metadata
+      * opportunity/action horizon outputs
+Output:
+      * rows into moment_candidate_features
+________________
+
+
+Step 2 — Score moment families
+Create:
+MomentFamilyScorerService
+
+
+Inputs:
+      * moment_candidate_features
+Output:
+      * family scores per candidate
+________________
+
+
+Step 3 — Select eligible moment type
+Create:
+MomentTypeSelectorService
+
+
+Inputs:
+      * family scores
+      * rules table
+      * feature table
+Output:
+      * moment_primary_type, secondary type, confidence
+________________
+
+
+Step 4 — Attach copy
+Create:
+MomentCopyResolverService
+
+
+Inputs:
+      * selected moment type
+      * intensity / urgency / actionability
+Output:
+      * short label
+      * medium label
+      * CTA style
+________________
+
+
+Step 5 — Save final moment row
+Create:
+MomentFrameWriterService
+
+
+Output:
+      * moment_frame_scores
+________________
+
+
+10.18 WHAT THIS ENGINE SHOULD EVENTUALLY POWER IN UI
+This module should not only power labels.
+It should power:
+Feed cards
+      * “Great before sunset”
+      * “Easy lunch nearby”
+Explanation chips
+      * “Good next stop”
+      * “Worth the short detour”
+Save nudges
+      * “Better tomorrow morning”
+Timing reminders
+      * “Best once the heat drops”
+Route reassurance
+      * “Fits well from where you are”
+Need-state support
+      * “Good casual dinner nearby”
+This is how the feed starts feeling situationally intelligent, not just “recommended.”
+________________
+
+
+10.19 FINAL RECOMMENDED MOMENT FAMILY SET (PRODUCTION VERSION)
+This is the set I recommend you freeze into v1:
+IMMEDIATE_ACTION
+SOCIAL_ENERGY
+OPPORTUNITY
+DISCOVERY
+PLANNING_GUIDANCE
+NEED_STATE
+RECOVERY
+TRANSITION
+ANCHOR_REINFORCEMENT
+
+
+This is complete enough to scale without being bloated.
+________________
+
+
+10.20 FINAL PRODUCT TRUTH
+If your ranking system answers:
+“What is best?”
+Then Moment Framing answers:
+“Why does this make sense for me now?”
+And in travel discovery, that second question is often what creates trust.
+Because people don’t just want good recommendations.
+They want recommendations that feel:
+      * timely,
+      * understandable,
+      * human,
+      * and situationally aware.
+That is exactly what this module should do.
+________________
+
+
+If you want, I can now take this one step further and build the fully implementation-ready version in the same style as your previous modules:
+Moment Framing Engine — Full Spec SQL/Table/Computation
+including:
+      * exact feature formulas,
+      * normalized score formulas,
+      * SQL population queries,
+      * moment type scoring formulas,
+      * Laravel service architecture,
+      * copy selection logic,
+      * fallback hierarchy,
+      * and final end-to-end execution flow.
+That would be the true production blueprint.

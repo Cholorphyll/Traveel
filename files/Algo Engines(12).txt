@@ -1,0 +1,1006 @@
+﻿ELIGIBILITY ENGINE — FINAL LOCKED VERSION
+Eligibility Engine Implementation Ready Spec
+1) Purpose
+The Eligibility Engine determines whether an entity is:
+valid enough to be allowed anywhere in the feed
+It is a hard gate, but should be used conservatively.
+It should exclude only entities that are:
+* invalid
+* impossible
+* misleading
+* clearly unusable
+* too weak / junk
+________________
+
+
+2) Golden Rule
+❗ “Not ideal right now” ≠ “exclude”
+Examples:
+* museum at night → eligible
+* park in poor weather → eligible
+* rooftop brunch at 9 PM → eligible
+* beach on cloudy day → eligible
+These are not Eligibility problems.
+They are handled later by:
+* Context Engine
+* Opportunity Engine
+* Action Horizon Engine
+* Slot Ranking Engine
+________________
+
+
+3) Final Engine Output
+[
+    'eligible' => true, // true | false
+    'eligibility_status' => 'pass', // pass | fail
+    'eligibility_reason_codes' => [],
+    'hard_fail_category' => null
+]
+
+
+________________
+
+
+4) Final Validator Structure
+EligibilityEngine
+ ├── IdentityValidator
+ ├── OperationalValidator
+ ├── TemporalValidator
+ ├── ContextValidator
+ ├── DegradationValidator
+ └── QualityValidator
+
+
+________________
+
+
+5) FINAL REQUIRED INPUT FIELDS
+These are the final fields the Eligibility Engine should use.
+________________
+
+
+🔹 A. CORE IDENTITY FIELDS
+* item_id
+* item_type          // sight | restaurant | experience | event
+* title
+* lat
+* lng
+* location_id
+
+
+These already exist in your raw data.
+________________
+
+
+🔹 B. OPERATIONAL SIGNALS
+* is_permanently_closed      // bool|null
+* is_temporarily_closed      // bool|null
+
+
+* closure_type               // permanent | temporary | cancelled | suspended | season_ended | ended | null
+* closure_reason             // renovation | weather | safety | expired | event_cancelled | seasonal_shutdown | unknown | null
+
+
+* operational_status_source  // google | tripadvisor | official | manual
+* operational_last_updated_at
+Avoided Operational Signals
+* Listing Activity Signals
+* Content Freshness Signals
+* External Presence Signals
+* Platform Consistency Signals
+* Admin / Manual Override Signals
+* conflicting_status_flag
+* trust weighting
+
+
+How to populate these
+From your single canonical source for the entity.
+Examples:
+* Google / TripAdvisor says “Permanently closed”
+→ is_permanently_closed = true
+→ closure_type = 'permanent'
+* Source says “Temporarily closed”
+→ is_temporarily_closed = true
+→ closure_type = 'temporary'
+* Event says “Cancelled”
+→ closure_type = 'cancelled'
+* Seasonal item says season ended / unavailable until next season
+→ closure_type = 'season_ended'
+* If not exposed by source
+→ leave as null
+Important rule
+Missing operational data should never fail the entity.
+________________
+
+
+🔹 C. TEMPORAL SIGNALS
+   * start_date         // datetime|null
+   * end_date           // datetime|null
+
+
+   * is_seasonal        // bool|null
+   * season_start       // date|null
+   * season_end         // date|null
+
+
+How to populate these
+________________
+
+
+start_date
+Use when the entity is time-bound:
+   * event start
+   * exhibition opening
+   * seasonal availability start
+   * limited-run experience
+If not applicable:
+   * start_date = null
+
+
+________________
+
+
+end_date
+Use when the entity has a known end:
+   * event end date
+   * temporary exhibition end
+   * festival closing date
+   * pop-up closure date
+If not applicable:
+   * end_date = null
+
+
+________________
+
+
+is_seasonal
+Set to:
+   * true
+
+
+if the entity is only valid during a seasonal window, for example:
+   * ski activity
+   * Christmas market
+   * monsoon-only attraction
+   * seasonal flower bloom
+Else:
+   * false or null
+
+
+Recommended:
+   * true when confirmed seasonal
+   * null when unknown
+   * false when explicitly non-seasonal
+________________
+
+
+season_start, season_end
+Populate only if seasonality is known.
+Example:
+   * tulip bloom attraction
+   * winter market
+   * snow experience
+If not available:
+   * null
+
+
+Important rule
+Do not invent seasonal windows unless the source clearly supports them.
+________________
+
+
+🔹 D. CONTEXT SIGNALS
+   * entity_location_id
+   * source_url
+This is the correct lean final version.
+
+
+Avoided Context Signals
+   * context_match_score
+   * page_location_id
+   * belongs_to_location
+   * distance_to_page_center_km
+   * max_allowed_distance_km
+________________
+
+
+entity_location_id
+Meaning
+The normalized location assigned to the entity in your own system.
+How to populate
+From your existing DB relation:
+   * entity_location_id = entity.location_id
+
+
+This should already exist for:
+   * sights
+   * restaurants
+   * experiences
+   * events
+________________
+
+
+source_url
+Meaning
+The original canonical source URL from which the entity was extracted.
+How to populate
+Store the canonical Google / TripAdvisor / official listing URL for that entity.
+Examples:
+   * Google listing URL
+   * TripAdvisor attraction page
+   * TripAdvisor restaurant page
+   * official event page
+Why this is useful
+This gives you:
+   * traceability
+   * auditability
+   * manual debugging
+   * future source-based checks if needed
+Important note
+source_url itself does not directly compute eligibility, but it is valid and useful context metadata for debugging / validator traceability.
+So it is worth keeping.
+________________
+
+
+🔹 E. DEGRADATION SIGNALS
+   * weather_block_flag     // bool|null
+   * safety_flag            // bool|null
+   * access_block_flag      // bool|null
+These should remain nullable.
+That means:
+If you do not have values, they should not affect eligibility.
+This is correct.
+________________
+
+
+How to populate them
+Only populate these when your source or data ingestion explicitly supports them.
+________________
+
+
+weather_block_flag
+Set to:
+   * true
+
+
+only if source or logic explicitly indicates the entity is currently unavailable due to weather.
+Examples:
+   * weather-sensitive boat ride suspended
+   * cable car shut due to storm
+   * outdoor activity blocked due to weather warning
+If unknown or not available:
+   * null
+
+
+Do not infer casually.
+________________
+
+
+safety_flag
+Set to:
+   * true
+
+
+only if source or known ingestion says:
+   * unsafe
+   * safety closure
+   * dangerous conditions
+   * official safety suspension
+If not available:
+   * null
+
+
+________________
+
+
+access_block_flag
+Set to:
+   * true
+
+
+only if source or ingestion explicitly indicates:
+   * inaccessible
+   * blocked entry
+   * access suspended
+   * route closure / no visitor access
+If unknown:
+   * null
+
+
+________________
+
+
+Important rule
+If any of these are null:
+   * null = ignore
+
+
+They should never fail an entity unless explicitly true.
+That is the correct behavior.
+________________
+
+
+🔹 F. QUALITY FLOOR SIGNALS
+   * content_completeness_score   // 0–1
+   * review_count
+
+
+________________
+
+
+content_completeness_score
+Meaning
+A deterministic measure of how complete / usable the entity record is.
+How to populate
+Compute from actual field coverage in your DB.
+Recommended fields:
+   * title
+   * description
+   * lat
+   * lng
+   * address
+   * rating
+   * review_count
+   * image
+   * category
+   * opening_hours
+
+
+________________
+
+
+Recommended formula
+$score = 0;
+$total = 9;
+
+
+if (!empty($title)) $score++;
+if (!empty($description)) $score++;
+if (!empty($lat) && !empty($lng)) $score++;
+if (!empty($address)) $score++;
+if (!empty($rating)) $score++;
+if (!empty($review_count)) $score++;
+if (!empty($image)) $score++;
+if (!empty($category)) $score++;
+if (!empty($opening_hours)) $score++;
+
+
+$content_completeness_score = $score / $total;
+
+
+This gives a real, explainable score between 0 and 1.
+Important rule
+This should be based on actual stored fields, not subjective judgment.
+________________
+
+
+review_count
+Meaning
+Number of reviews for the entity from the canonical source.
+How to populate
+Use the source’s review count field:
+Examples:
+   * Google review count
+   * TripAdvisor review count
+If unavailable:
+   * review_count = 0 or null
+
+
+Recommended:
+   * use actual integer if known
+   * default to 0 if missing during normalized processing
+________________
+
+
+6) VALIDATOR 1 — IDENTITY VALIDATOR (FINAL)
+Purpose
+Determines whether the entity is a real, coherent, actionable thing.
+________________
+
+
+❌ FAIL if:
+   * title is empty
+   * OR lat is null
+   * OR lng is null
+
+
+Also fail if entity is structurally too incomplete:
+   * content_completeness_score < 0.20
+
+
+________________
+
+
+Fail reason codes
+   * JUNK_ENTITY
+   * MALFORMED_ENTITY
+   * INSUFFICIENT_IDENTITY
+
+
+________________
+
+
+Validator
+private function identityValidator($item)
+{
+    $reasons = [];
+
+
+    if (empty($item->title) || $item->lat === null || $item->lng === null) {
+        $reasons[] = 'INSUFFICIENT_IDENTITY';
+    }
+    if (
+        $item->content_completeness_score !== null &&
+        $item->content_completeness_score < 0.20
+    ) {
+        $reasons[] = 'MALFORMED_ENTITY';
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+7) VALIDATOR 2 — OPERATIONAL VALIDATOR (FINAL)
+Purpose
+Determines whether the entity is still operational / usable in the real world.
+This should rely only on explicit source status.
+________________
+
+
+Step A — Derive operational state
+private function deriveOperationalState($item)
+{
+    if ($item->is_permanently_closed === true || $item->closure_type === 'permanent') {
+        return 'closed';
+    }
+    if (in_array($item->closure_type, ['cancelled', 'ended', 'season_ended'])) {
+        return 'ended';
+    }
+    if (
+        $item->is_temporarily_closed === true
+        || in_array($item->closure_type, ['temporary', 'suspended'])
+    ) {
+        return 'temporarily_unavailable';
+    }
+    return 'open';
+}
+________________
+
+
+❌ FAIL if:
+   * operational_state == 'closed'
+   * operational_state == 'ended'
+   * operational_state == 'temporarily_unavailable'
+
+
+Important rule
+If operational fields are null:
+   * operational_state = 'open'
+
+
+Meaning: Missing operational data does not fail the entity.
+________________
+
+
+Fail reason codes
+   * PERMANENTLY_CLOSED
+   * NO_LONGER_OPERATING
+   * CANCELLED
+   * ENDED
+   * TEMPORARILY_UNAVAILABLE
+________________
+
+
+Validator
+private function operationalValidator($item)
+{
+    $reasons = [];
+    $state = $this->deriveOperationalState($item);
+    if ($state === 'closed') {
+        $reasons[] = 'PERMANENTLY_CLOSED';
+    } elseif ($state === 'ended') {
+        $reasons[] = 'ENDED';
+    } elseif ($state === 'temporarily_unavailable') {
+        $reasons[] = 'TEMPORARILY_UNAVAILABLE';
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+8) VALIDATOR 3 — TEMPORAL VALIDATOR (FINAL)
+Purpose
+Determines whether the entity is still valid within time.
+This is important for:
+   * events
+   * temporary exhibitions
+   * seasonal experiences
+   * date-bound activities
+________________
+
+
+❌ FAIL if end date already passed
+   * if (end_date != null && end_date < now())
+
+
+________________
+
+
+❌ FAIL if seasonal item is outside active season
+if (
+    is_seasonal == true &&
+    season_start != null &&
+    season_end != null &&
+    today NOT BETWEEN season_start AND season_end
+)
+Important rule
+Do not fail just because opening hours don’t fit the current time.
+That belongs later, not here.
+________________
+
+
+Fail reason codes
+   * EVENT_EXPIRED
+   * SEASON_EXPIRED
+   * DATE_WINDOW_CLOSED
+________________
+
+
+Validator
+private function temporalValidator($item)
+{
+    $reasons = [];
+    $today = now()->toDateString();
+    if ($item->end_date && $item->end_date < now()) {
+        $reasons[] = 'EVENT_EXPIRED';
+    }
+    if (
+        $item->is_seasonal === true &&
+        $item->season_start &&
+        $item->season_end
+    ) {
+        if (!($today >= $item->season_start && $today <= $item->season_end)) {
+            $reasons[] = 'SEASON_EXPIRED';
+        }
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+9) VALIDATOR 4 — CONTEXT VALIDATOR (FINAL)
+Purpose
+Determines whether the entity structurally belongs to the current location universe.
+Since your context layer is intentionally lean, this validator should remain minimal.
+________________
+
+
+❌ FAIL if:
+   * entity_location_id is null
+
+
+Because if the entity cannot be placed into your location system, it cannot truthfully participate in a scoped feed.
+________________
+
+
+Fail reason codes
+   * FALSE_CONTEXT_RELATION
+   * OUT_OF_SCOPE_GEOGRAPHY
+   * BAD_PARENT_MAPPING
+
+
+For now, use:
+   * BAD_PARENT_MAPPING
+as the practical reason when location linkage is missing.
+________________
+
+
+Validator
+private function contextValidator($item)
+{
+    $reasons = [];
+    if ($item->entity_location_id === null) {
+        $reasons[] = 'BAD_PARENT_MAPPING';
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+10) VALIDATOR 5 — DEGRADATION VALIDATOR (FINAL)
+Purpose
+Determines whether the entity is currently unusable due to hard degradation conditions.
+These fields are nullable and should only affect eligibility when explicitly true.
+________________
+
+
+❌ FAIL if:
+   * weather_block_flag === true
+   * OR safety_flag === true
+   * OR access_block_flag === true
+If any are null, ignore them.
+________________
+
+
+Fail reason codes
+   * WEATHER_DEPENDENT_CANCELLED
+   * UNSAFE_NOW
+   * ACCESS_BLOCKED
+________________
+
+
+Validator
+private function degradationValidator($item)
+{
+    $reasons = [];
+    if ($item->weather_block_flag === true) {
+        $reasons[] = 'WEATHER_DEPENDENT_CANCELLED';
+    }
+    if ($item->safety_flag === true) {
+        $reasons[] = 'UNSAFE_NOW';
+    }
+    if ($item->access_block_flag === true) {
+        $reasons[] = 'ACCESS_BLOCKED';
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+11) VALIDATOR 6 — QUALITY VALIDATOR (FINAL)
+Purpose
+Prevents junk / ultra-thin entities from entering the feed.
+________________
+
+
+❌ FAIL if:
+   * content_completeness_score < 0.20
+   * AND review_count < 5
+This is a conservative quality floor.
+It removes:
+   * weak scraps
+   * malformed thin listings
+   * junk entities
+But does not remove:
+   * niche but valid entities
+   * low-review real places with decent metadata
+________________
+
+
+Fail reason codes
+   * LOW_QUALITY_JUNK
+   * THIN_RECORD
+   * NON_ACTIONABLE_PLACE
+________________
+
+
+Validator
+private function qualityValidator($item)
+{
+    $reasons = [];
+    if (
+        $item->content_completeness_score !== null &&
+        $item->content_completeness_score < 0.20 &&
+        ($item->review_count ?? 0) < 5
+    ) {
+        $reasons[] = 'LOW_QUALITY_JUNK';
+    }
+    return [
+        'passed' => empty($reasons),
+        'reasons' => $reasons
+    ];
+}
+________________
+
+
+12) FINAL MERGE LOGIC
+Eligibility fails if any validator fails.
+That is the final rule.
+________________
+
+
+Merge Function
+private function mergeEligibilityResults(array $validators)
+{
+    $allReasons = [];
+    $hardFailCategory = null;
+    foreach ($validators as $validatorName => $result) {
+        if (!$result['passed']) {
+            $allReasons = array_merge($allReasons, $result['reasons']);
+
+
+            if ($hardFailCategory === null) {
+                $hardFailCategory = $validatorName;
+            }
+        }
+    }
+    return [
+        'eligible' => empty($allReasons),
+        'eligibility_status' => empty($allReasons) ? 'pass' : 'fail',
+        'eligibility_reason_codes' => array_values(array_unique($allReasons)),
+        'hard_fail_category' => $hardFailCategory
+    ];
+}
+________________
+
+
+13) FULL FINAL LARAVEL SERVICE CLASS
+class EligibilityEngine
+{
+    public function evaluate($item)
+    {
+        $validators = [
+            'identity' => $this->identityValidator($item),
+            'operational' => $this->operationalValidator($item),
+            'temporal' => $this->temporalValidator($item),
+            'context' => $this->contextValidator($item),
+            'degradation' => $this->degradationValidator($item),
+            'quality' => $this->qualityValidator($item),
+        ];
+
+
+        return $this->mergeEligibilityResults($validators);
+    }
+
+
+    private function identityValidator($item)
+    {
+        $reasons = [];
+
+
+        if (empty($item->title) || $item->lat === null || $item->lng === null) {
+            $reasons[] = 'INSUFFICIENT_IDENTITY';
+        }
+
+
+        if (
+            $item->content_completeness_score !== null &&
+            $item->content_completeness_score < 0.20
+        ) {
+            $reasons[] = 'MALFORMED_ENTITY';
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function deriveOperationalState($item)
+    {
+        if ($item->is_permanently_closed === true || $item->closure_type === 'permanent') {
+            return 'closed';
+        }
+
+
+        if (in_array($item->closure_type, ['cancelled', 'ended', 'season_ended'])) {
+            return 'ended';
+        }
+
+
+        if (
+            $item->is_temporarily_closed === true
+            || in_array($item->closure_type, ['temporary', 'suspended'])
+        ) {
+            return 'temporarily_unavailable';
+        }
+
+
+        return 'open';
+    }
+
+
+    private function operationalValidator($item)
+    {
+        $reasons = [];
+        $state = $this->deriveOperationalState($item);
+
+
+        if ($state === 'closed') {
+            $reasons[] = 'PERMANENTLY_CLOSED';
+        } elseif ($state === 'ended') {
+            $reasons[] = 'ENDED';
+        } elseif ($state === 'temporarily_unavailable') {
+            $reasons[] = 'TEMPORARILY_UNAVAILABLE';
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function temporalValidator($item)
+    {
+        $reasons = [];
+        $today = now()->toDateString();
+
+
+        if ($item->end_date && $item->end_date < now()) {
+            $reasons[] = 'EVENT_EXPIRED';
+        }
+
+
+        if (
+            $item->is_seasonal === true &&
+            $item->season_start &&
+            $item->season_end
+        ) {
+            if (!($today >= $item->season_start && $today <= $item->season_end)) {
+                $reasons[] = 'SEASON_EXPIRED';
+            }
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function contextValidator($item)
+    {
+        $reasons = [];
+
+
+        if ($item->entity_location_id === null) {
+            $reasons[] = 'BAD_PARENT_MAPPING';
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function degradationValidator($item)
+    {
+        $reasons = [];
+
+
+        if ($item->weather_block_flag === true) {
+            $reasons[] = 'WEATHER_DEPENDENT_CANCELLED';
+        }
+
+
+        if ($item->safety_flag === true) {
+            $reasons[] = 'UNSAFE_NOW';
+        }
+
+
+        if ($item->access_block_flag === true) {
+            $reasons[] = 'ACCESS_BLOCKED';
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function qualityValidator($item)
+    {
+        $reasons = [];
+
+
+        if (
+            $item->content_completeness_score !== null &&
+            $item->content_completeness_score < 0.20 &&
+            ($item->review_count ?? 0) < 5
+        ) {
+            $reasons[] = 'LOW_QUALITY_JUNK';
+        }
+
+
+        return [
+            'passed' => empty($reasons),
+            'reasons' => $reasons
+        ];
+    }
+
+
+    private function mergeEligibilityResults(array $validators)
+    {
+        $allReasons = [];
+        $hardFailCategory = null;
+
+
+        foreach ($validators as $validatorName => $result) {
+            if (!$result['passed']) {
+                $allReasons = array_merge($allReasons, $result['reasons']);
+
+
+                if ($hardFailCategory === null) {
+                    $hardFailCategory = $validatorName;
+                }
+            }
+        }
+
+
+        return [
+            'eligible' => empty($allReasons),
+            'eligibility_status' => empty($allReasons) ? 'pass' : 'fail',
+            'eligibility_reason_codes' => array_values(array_unique($allReasons)),
+            'hard_fail_category' => $hardFailCategory
+        ];
+    }
+}
+
+
+________________
+
+
+14) FINAL DATABASE TABLE
+CREATE TABLE feed_item_eligibility (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    item_type ENUM('sight','restaurant','experience','event') NOT NULL,
+    item_id BIGINT NOT NULL,
+    eligible TINYINT(1) NOT NULL DEFAULT 1,
+    eligibility_status ENUM('pass','fail') NOT NULL DEFAULT 'pass',
+    hard_fail_category VARCHAR(100) NULL,
+    reason_codes_json JSON NULL,
+    last_evaluated_at DATETIME NULL,
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL,
+    UNIQUE KEY uniq_item (item_type, item_id),
+    INDEX idx_eligible (eligible),
+    INDEX idx_status (eligibility_status),
+    INDEX idx_last_eval (last_evaluated_at)
+);
+________________
+
+
+15) FINAL CANONICAL DEFINITION
+The Eligibility Engine determines whether a candidate entity remains structurally, operationally, temporally, contextually, and qualitatively valid enough to participate anywhere in the feed.
+It excludes only entities that are invalid, impossible, misleading, clearly unusable, or too weak / junk.
+It must not exclude entities merely because they are poorly timed, less convenient, less exciting, lower priority, or not ideal for the current moment.
+________________
+
+
+16) FINAL IMPORTANT BOUNDARY
+Eligibility should NEVER exclude because:
+   * it is closed at this hour
+   * it is far away
+   * it is not exciting enough
+   * it is weak for current weather
+   * it is better tomorrow than now
+   * it is not ideal for the current slot
+Those belong to later engines.
+________________
+
+
+✅ FINAL RESULT
+This is now the true final lockable version of your Eligibility Engine.
+It is:
+   * deterministic
+   * lean
+   * realistic
+   * source-aligned
+   * production-usable
+   * not over-engineered
+And now it’s at the right maturity level to move forward.
+________________
