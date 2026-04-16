@@ -120,14 +120,26 @@ class HotelController extends Controller
             $longnitude = $getbesthotel[0]->longnitude; 
             if($Latitude !="" && $longnitude != "" ){
             $searchradius = 10;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $searchradius / 111.045;
+            $lng_range = $searchradius / (111.045 * cos(deg2rad($Latitude)));
+            
             $popular_landmark = DB::table("Sight")
             ->join('Location as l','l.LocationId','=','Sight.LocationId') 
                 ->select('Sight.SightId', 'Sight.Title', 'Sight.LocationId', 'Sight.Slug','l.slugid',
-                    DB::raw("6371 * acos(cos(radians(" . $Latitude . "))
+                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $Latitude . "))
                         * cos(radians(Sight.Latitude))
                         * cos(radians(Sight.Longitude) - radians(" . $longnitude . "))
                         + sin(radians(" . $Latitude . "))
-                        * sin(radians(Sight.Latitude))) AS distance"))
+                        * sin(radians(Sight.Latitude)))) AS distance"))
+                ->whereRaw('Sight.Latitude BETWEEN ? AND ?', [
+                    $Latitude - $lat_range,
+                    $Latitude + $lat_range
+                ])
+                ->whereRaw('Sight.Longitude BETWEEN ? AND ?', [
+                    $longnitude - $lng_range,
+                    $longnitude + $lng_range
+                ])
                 ->groupBy("Sight.SightId")
                 ->having('distance', '<=', $searchradius)
                 
@@ -1672,14 +1684,26 @@ if (!$existingEntry_outdoor) {
                
                  if($Latitude !="" && $longnitude != "" ){
                  $searchradius = 50;
+                 // Bounding box optimization - filter rows BEFORE distance calculation
+                 $lat_range = $searchradius / 111.045;
+                 $lng_range = $searchradius / (111.045 * cos(deg2rad($Latitude)));
+                 
                  $popular_landmark = DB::table("Sight")
                      ->select('SightId', 'Title', 'LocationId', 'Slug',
-                         DB::raw("6371 * acos(cos(radians(" . $Latitude . "))
+                         DB::raw("6371 * acos(LEAST(1, cos(radians(" . $Latitude . "))
                              * cos(radians(Sight.Latitude))
                              * cos(radians(Sight.Longitude) - radians(" . $longnitude . "))
                              + sin(radians(" . $Latitude . "))
-                             * sin(radians(Sight.Latitude))) AS distance"))
-                     ->where('Sight.IsMustSee')
+                             * sin(radians(Sight.Latitude)))) AS distance"))
+                     ->where('Sight.IsMustSee', 1)
+                     ->whereRaw('Sight.Latitude BETWEEN ? AND ?', [
+                         $Latitude - $lat_range,
+                         $Latitude + $lat_range
+                     ])
+                     ->whereRaw('Sight.Longitude BETWEEN ? AND ?', [
+                         $longnitude - $lng_range,
+                         $longnitude + $lng_range
+                     ])
                      ->groupBy("Sight.SightId")
                      ->having('distance', '<=', $searchradius)
                      
@@ -2626,14 +2650,26 @@ if (!$existingEntry_outdoor) {
                       
                 if( $latitude !="" && $longitude !=""){
                     $nbh = 1; 
-                    $searchradius = 44; 
+                    $searchradius = 44;
+                    // Bounding box optimization - filter rows BEFORE distance calculation
+                    $lat_range = $searchradius / 111.045;
+                    $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+                    
                     $nearby_hotelsswiming = DB::table("TPHotel")           
                         ->select('id', 'name','location_id','slug',
-                                    DB::raw("6371 * acos(cos(radians(" . $latitude . ")) 
+                                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . ")) 
                         * cos(radians(TPHotel.Latitude)) 
                         * cos(radians(TPHotel.longnitude) - radians(" . $longitude . ")) 
                         + sin(radians(" . $latitude . ")) 
-                        * sin(radians(TPHotel.Latitude))) AS distance"))     
+                        * sin(radians(TPHotel.Latitude)))) AS distance"))     
+                        ->whereRaw('TPHotel.Latitude BETWEEN ? AND ?', [
+                            $latitude - $lat_range,
+                            $latitude + $lat_range
+                        ])
+                        ->whereRaw('TPHotel.longnitude BETWEEN ? AND ?', [
+                            $longitude - $lng_range,
+                            $longitude + $lng_range
+                        ])
                         ->having('distance', '<=', $searchradius)  
                         ->where('amenities', 'like', '%swimming pool%')  
                         ->where('location_id',$locid) 
@@ -2685,14 +2721,26 @@ if (!$existingEntry_outdoor) {
          
         if( $latitude !="" && $longitude !=""){
             $h24 =1;   
-            $searchradius = 44; 
+            $searchradius = 44;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $searchradius / 111.045;
+            $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+            
             $get24hours = DB::table("TPHotel")           
                 ->select('id', 'name','location_id','slug',
-                            DB::raw("6371 * acos(cos(radians(" . $latitude . ")) 
+                            DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . ")) 
                 * cos(radians(TPHotel.Latitude)) 
                 * cos(radians(TPHotel.longnitude) - radians(" . $longitude . ")) 
                 + sin(radians(" . $latitude . ")) 
-                * sin(radians(TPHotel.Latitude))) AS distance"))     
+                * sin(radians(TPHotel.Latitude)))) AS distance"))     
+                ->whereRaw('TPHotel.Latitude BETWEEN ? AND ?', [
+                    $latitude - $lat_range,
+                    $latitude + $lat_range
+                ])
+                ->whereRaw('TPHotel.longnitude BETWEEN ? AND ?', [
+                    $longitude - $lng_range,
+                    $longitude + $lng_range
+                ])
                 ->having('distance', '<=', $searchradius)  
                 ->where('amenities', 'like', '%24 hour Front Desk Service%')  
                 ->where('location_id',$locid) 

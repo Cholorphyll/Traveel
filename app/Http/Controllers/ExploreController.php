@@ -869,7 +869,12 @@ class ExploreController extends Controller
                 $takeCount = min($takeCount, $totalCandidates);
                 $takeCount = max(1, min($takeCount, 120));
 
-                $distanceSql = '(6371 * acos(cos(radians(?)) * cos(radians(s.Latitude)) * cos(radians(s.Longitude) - radians(?)) + sin(radians(?)) * sin(radians(s.Latitude))))';
+                $distanceSql = '(6371 * acos(LEAST(1, cos(radians(?)) * cos(radians(s.Latitude)) * cos(radians(s.Longitude) - radians(?)) + sin(radians(?)) * sin(radians(s.Latitude)))))';
+
+                // Bounding box optimization - filter rows BEFORE distance calculation
+                $searchRadius = 50; // Max reasonable distance for nearby attractions
+                $lat_range = $searchRadius / 111.045;
+                $lng_range = $searchRadius / (111.045 * cos(deg2rad($focusLat)));
 
                 $attractionsQuery = DB::table('Sight as s')
                     ->select(
@@ -892,6 +897,14 @@ class ExploreController extends Controller
                     ->whereNotNull('s.Longitude')
                     ->whereIn('s.tier', [1, 2])
                     ->where('s.SightId', '<>', $focusSight->SightId)
+                    ->whereRaw('s.Latitude BETWEEN ? AND ?', [
+                        $focusLat - $lat_range,
+                        $focusLat + $lat_range
+                    ])
+                    ->whereRaw('s.Longitude BETWEEN ? AND ?', [
+                        $focusLon - $lng_range,
+                        $focusLon + $lng_range
+                    ])
                     ->orderBy('distance_km', 'asc')
                     ->limit($takeCount)
                     ->get();

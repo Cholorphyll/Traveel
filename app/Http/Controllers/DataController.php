@@ -1798,15 +1798,27 @@ if ($sightTiming && !empty($sightTiming->timings)) {
         if (!$get_nearby_rest->count() >= 4) {
             $nearrest = 1;
             $restradus = 5;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $restradus / 111.045;
+            $lng_range = $restradus / (111.045 * cos(deg2rad($latitude)));
+            
             $nearby_rest = DB::table("Restaurant as r")
                 ->leftJoin('RestaurantReview as rr', 'r.RestaurantId', '=', 'rr.RestaurantId')
                 ->select('r.Title','r.TATrendingScore','r.slugid','r.RestaurantId','r.Slug',
-                    DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                     * cos(radians(r.Latitude))
                     * cos(radians(r.Longitude) - radians(" . $longitude . "))
                     + sin(radians(" . $latitude . "))
-                    * sin(radians(r.Latitude))) AS distance"),
+                    * sin(radians(r.Latitude)))) AS distance"),
                     DB::raw("COUNT(rr.RestaurantReviewId) as review_count"))
+                ->whereRaw('r.Latitude BETWEEN ? AND ?', [
+                    $latitude - $lat_range,
+                    $latitude + $lat_range
+                ])
+                ->whereRaw('r.Longitude BETWEEN ? AND ?', [
+                    $longitude - $lng_range,
+                    $longitude + $lng_range
+                ])
                 ->groupBy("r.RestaurantId")
                 ->having('distance', '<=', $restradus)
                 ->orderBy('distance')
@@ -5357,16 +5369,27 @@ if ($hotelData) {
         $restradus= 1;
 
         if($nearby_restcheck->isEmpty() &&  $latitude !="" && $longitude !="" ){
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $restradus / 111.045;
+            $lng_range = $restradus / (111.045 * cos(deg2rad($latitude)));
 
             $nearby_rest = DB::table("Restaurant as r")
             ->leftJoin('RestaurantReview as rr', 'r.RestaurantId', '=', 'rr.RestaurantId')
             ->select('r.Title','r.TATrendingScore','r.slugid','r.RestaurantId','r.Slug',
-                    DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                     * cos(radians(r.Latitude))
                     * cos(radians(r.Longitude) - radians(" . $longitude . "))
                     + sin(radians(" . $latitude . "))
-                    * sin(radians(r.Latitude))) AS distance"),
+                    * sin(radians(r.Latitude)))) AS distance"),
                     DB::raw("COUNT(rr.RestaurantReviewId) as review_count"))
+            ->whereRaw('r.Latitude BETWEEN ? AND ?', [
+                $latitude - $lat_range,
+                $latitude + $lat_range
+            ])
+            ->whereRaw('r.Longitude BETWEEN ? AND ?', [
+                $longitude - $lng_range,
+                $longitude + $lng_range
+            ])
             ->groupBy("r.RestaurantId")
             ->having('distance', '<=', $restradus)
             ->orderBy('distance')
@@ -5673,22 +5696,34 @@ if (!$getdata->isEmpty()) {
            if($latitude != "" && $longitude !=""){
                if (!$nb_sighttable->count() >= 4) {
                    $sredius= 5;
+                   // Calculate bounding box to filter rows BEFORE expensive distance calculation
+                   $lat_range = $sredius / 111.045;
+                   $lng_range = $sredius / (111.045 * cos(deg2rad($latitude)));
+                   
                     $nearby_sights = DB::table("Sight")
                             ->join('Location as l','l.LocationId','=','Sight.LocationId')
                             ->leftjoin('Category as c','c.CategoryId','=','Sight.CategoryId')
                             ->select('Sight.SightId', 'l.slugid','Sight.Title','Sight.LocationId','Sight.Slug',
                             'c.Title as catname','Sight.TAAggregateRating',
                             'Sight.Latitude','Sight.Longitude',
-                                    DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                                 * cos(radians(Sight.Latitude))
                                 * cos(radians(Sight.Longitude) - radians(" . $longitude . "))
                                 + sin(radians(" . $latitude . "))
-                                * sin(radians(Sight.Latitude))) AS distance"))
+                                * sin(radians(Sight.Latitude)))) AS distance"))
+                            ->where('Sight.IsMustSee',1)
+                            ->whereRaw('Sight.Latitude BETWEEN ? AND ?', [
+                                $latitude - $lat_range,
+                                $latitude + $lat_range
+                            ])
+                            ->whereRaw('Sight.Longitude BETWEEN ? AND ?', [
+                                $longitude - $lng_range,
+                                $longitude + $lng_range
+                            ])
                             ->groupBy("Sight.SightId")
                             ->having('distance', '<=', $sredius)
                             ->orderBy('distance')
                             ->limit(4)
-                            ->where('Sight.IsMustSee',1)
                             ->get();
 
 
@@ -9207,13 +9242,25 @@ public function recenthotels(Request $request)
         if($latitude !="" &&  $longitude !=""){
             //similar experience
             $searchradius = 50;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $searchradius / 111.045;
+            $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+            
             $nearby_exp= DB::table("Experience as exp")
             ->select('ExperienceId', 'Name','Slug','LocationId','slugid','Img1','adult_price',
-                        DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                        DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                 * cos(radians(exp.Latitude))
                 * cos(radians(exp.Longitude) - radians(" . $longitude . "))
                 + sin(radians(" . $latitude . "))
-                * sin(radians(exp.Latitude))) AS distance"))
+                * sin(radians(exp.Latitude)))) AS distance"))
+            ->whereRaw('exp.Latitude BETWEEN ? AND ?', [
+                $latitude - $lat_range,
+                $latitude + $lat_range
+            ])
+            ->whereRaw('exp.Longitude BETWEEN ? AND ?', [
+                $longitude - $lng_range,
+                $longitude + $lng_range
+            ])
             ->having('distance', '<=', $searchradius)
             ->where('LocationId',$locationID)
             ->whereNotIn('ExperienceId', [$exp_id])
@@ -10356,13 +10403,25 @@ if (!$getparent->isEmpty() && $getparent[0]->LocationLevel != 1) {
         if (!$get_nearby_hotel->count() >= 5) {
             $nbh = 1;
              $searchradius = 10;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $searchradius / 111.045;
+            $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+            
             $nearby_hotel = DB::table("TPHotel")
             ->select('id', 'name','location_id','slug','address','pricefrom','stars',
-                    DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                 * cos(radians(TPHotel.Latitude))
                 * cos(radians(TPHotel.longnitude) - radians(" . $longitude . "))
                 + sin(radians(" . $latitude . "))
-                * sin(radians(TPHotel.Latitude))) AS distance"))
+                * sin(radians(TPHotel.Latitude)))) AS distance"))
+            ->whereRaw('TPHotel.Latitude BETWEEN ? AND ?', [
+                $latitude - $lat_range,
+                $latitude + $lat_range
+            ])
+            ->whereRaw('TPHotel.longnitude BETWEEN ? AND ?', [
+                $longitude - $lng_range,
+                $longitude + $lng_range
+            ])
             ->having('distance', '<=', $searchradius)
             ->where('location_id',$locationid)
 
@@ -10437,14 +10496,26 @@ if (!$getparent->isEmpty() && $getparent[0]->LocationLevel != 1) {
   
         if (!$get_nearby_hotel->count() >= 1) {
             $nbh = 1;
-             $searchradius = 10; 
+             $searchradius = 10;
+             // Bounding box optimization - filter rows BEFORE distance calculation
+             $lat_range = $searchradius / 111.045;
+             $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+             
              $nearby_hotel = DB::table("TPHotel")           
                  ->select('id', 'name','location_id','slug','address','stars','pricefrom',
-                     DB::raw("6371 * acos(cos(radians(" . $latitude . ")) 
+                     DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . ")) 
                      * cos(radians(TPHotel.Latitude)) 
                      * cos(radians(TPHotel.longnitude) - radians(" . $longitude . ")) 
                      + sin(radians(" . $latitude . ")) 
-                     * sin(radians(TPHotel.Latitude))) AS distance"))
+                     * sin(radians(TPHotel.Latitude)))) AS distance"))
+                 ->whereRaw('TPHotel.Latitude BETWEEN ? AND ?', [
+                     $latitude - $lat_range,
+                     $latitude + $lat_range
+                 ])
+                 ->whereRaw('TPHotel.longnitude BETWEEN ? AND ?', [
+                     $longitude - $lng_range,
+                     $longitude + $lng_range
+                 ])
                //  ->groupBy("TPHotel.SightId")
                  ->having('distance', '<=', $searchradius)
                 // ->where('TPHotel.hotelid', '!=', $sightid)
@@ -12691,6 +12762,10 @@ if (!empty($result)) {
 
             //get location
             $searchradius =50;
+            // Bounding box optimization - filter rows BEFORE distance calculation
+            $lat_range = $searchradius / 111.045;
+            $lng_range = $searchradius / (111.045 * cos(deg2rad($latitude)));
+            
             $nearby_Sight = DB::table("Sight")
                 ->join('Temp_Mapping as t', 'Sight.LocationId', '=', 't.tid')
                 ->join('Category as c', 'c.CategoryId', '=', 'Sight.CategoryId')
@@ -12698,12 +12773,20 @@ if (!empty($result)) {
                     'Sight.LocationId',
                     'Sight.Title','t.slugid','t.slug',
                     't.LocationId as locid', 'c.Title as ctitle','Sight.Latitude','Sight.Longitude',
-                    DB::raw("6371 * acos(cos(radians(" . $latitude . "))
+                    DB::raw("6371 * acos(LEAST(1, cos(radians(" . $latitude . "))
                         * cos(radians(Sight.Latitude))
                         * cos(radians(Sight.Longitude) - radians(" . $longitude . "))
                         + sin(radians(" . $latitude . "))
-                        * sin(radians(Sight.Latitude))) AS distance")
+                        * sin(radians(Sight.Latitude)))) AS distance")
                 )
+                ->whereRaw('Sight.Latitude BETWEEN ? AND ?', [
+                    $latitude - $lat_range,
+                    $latitude + $lat_range
+                ])
+                ->whereRaw('Sight.Longitude BETWEEN ? AND ?', [
+                    $longitude - $lng_range,
+                    $longitude + $lng_range
+                ])
                 ->having('distance', '<=', $searchradius)
                 ->orWhere('Sight.IsMustSee', '=', 1)
 
@@ -12721,12 +12804,24 @@ if (!empty($result)) {
                 $slongitude = $val->Longitude;
 
                 $searchradius =10;
+                // Bounding box optimization - filter rows BEFORE distance calculation
+                $lat_range_h = $searchradius / 111.045;
+                $lng_range_h = $searchradius / (111.045 * cos(deg2rad($slat)));
+                
                 $sight_hotelcount = DB::table("TPHotel as h")
-                ->select(DB::raw("6371 * acos(cos(radians(" . $slat . "))
+                ->select(DB::raw("6371 * acos(LEAST(1, cos(radians(" . $slat . "))
                     * cos(radians(h.Latitude))
                     * cos(radians(h.longnitude) - radians(" . $slongitude . "))
                     + sin(radians(" . $slat . "))
-                    * sin(radians(h.Latitude))) AS distance"))
+                    * sin(radians(h.Latitude)))) AS distance"))
+                ->whereRaw('h.Latitude BETWEEN ? AND ?', [
+                    $slat - $lat_range_h,
+                    $slat + $lat_range_h
+                ])
+                ->whereRaw('h.longnitude BETWEEN ? AND ?', [
+                    $slongitude - $lng_range_h,
+                    $slongitude + $lng_range_h
+                ])
                 ->having('distance', '<=', $searchradius)
                 ->count();
 

@@ -430,6 +430,11 @@ class EntityStructuralImportancePopulator
         }
 
         // Find top anchors within 1.2km
+        $searchRadius = 1.2;
+        // Bounding box optimization - filter rows BEFORE distance calculation
+        $lat_range = $searchRadius / 111.045;
+        $lng_range = $searchRadius / (111.045 * cos(deg2rad($entity->lat)));
+        
         $topAnchors = DB::table('entity_structural_importance as esi')
             ->join('entity_structural_base as esb', function ($join) {
                 $join->on('esi.entity_type', '=', 'esb.entity_type')
@@ -439,13 +444,21 @@ class EntityStructuralImportancePopulator
             ->where('esi.intrinsic_importance_score', '>=', 0.70)
             ->whereNotNull('esb.lat')
             ->whereNotNull('esb.lng')
+            ->whereRaw('esb.lat BETWEEN ? AND ?', [
+                $entity->lat - $lat_range,
+                $entity->lat + $lat_range
+            ])
+            ->whereRaw('esb.lng BETWEEN ? AND ?', [
+                $entity->lng - $lng_range,
+                $entity->lng + $lng_range
+            ])
             ->select([
                 'esb.lat', 'esb.lng', 'esi.intrinsic_importance_score',
                 DB::raw("
-                    (6371 * acos(cos(radians({$entity->lat})) * cos(radians(esb.lat)) * cos(radians(esb.lng) - radians({$entity->lng})) + sin(radians({$entity->lat})) * sin(radians(esb.lat)))) as distance
+                    (6371 * acos(LEAST(1, cos(radians({$entity->lat})) * cos(radians(esb.lat)) * cos(radians(esb.lng) - radians({$entity->lng})) + sin(radians({$entity->lat})) * sin(radians(esb.lat))))) as distance
                 ")
             ])
-            ->havingRaw('distance <= 1.2')
+            ->havingRaw('distance <= ?', [$searchRadius])
             ->get();
 
         // Spec: Lines 1319-1339

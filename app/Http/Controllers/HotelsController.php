@@ -1436,19 +1436,31 @@ public function showHotelDetails($hotelId) {
                     if ($att_bestH->isEmpty()) {
                         $bhv = 1;               
                      
-                        $searchradius = 50; 
+                        $searchradius = 50;
+                        // Bounding box optimization - filter rows BEFORE distance calculation
+                        $lat_range = $searchradius / 111.045;
+                        $lng_range = $searchradius / (111.045 * cos(deg2rad($Latitude)));
+                        
                         $nearby_sight = DB::table("Sight")
                         ->select('SightId', 'Title', 'LocationId', 'Slug',
-                            DB::raw("6371 * acos(cos(radians(" . $Latitude . "))
+                            DB::raw("6371 * acos(LEAST(1, cos(radians(" . $Latitude . "))
                                 * cos(radians(Sight.Latitude))
                                 * cos(radians(Sight.Longitude) - radians(" . $longnitude . "))
                                 + sin(radians(" . $Latitude . "))
-                                * sin(radians(Sight.Latitude))) AS distance"))
+                                * sin(radians(Sight.Latitude)))) AS distance"))
+                        ->where('IsMustSee', 1)
+                        ->whereRaw('Sight.Latitude BETWEEN ? AND ?', [
+                            $Latitude - $lat_range,
+                            $Latitude + $lat_range
+                        ])
+                        ->whereRaw('Sight.Longitude BETWEEN ? AND ?', [
+                            $longnitude - $lng_range,
+                            $longnitude + $lng_range
+                        ])
                         ->groupBy("Sight.SightId")
                         ->having('distance', '<=', $searchradius)                      
                         ->orderBy('distance')
                         ->limit(5)
-                        ->where('IsMustSee', 1)
                         ->get();
 
 
