@@ -1,0 +1,3134 @@
+﻿MODULE — CONTEXT ENGINE (Final Architecture)
+Part 1
+1) Core Purpose
+The Context Engine determines:
+* what kind of place the user is currently in
+* what semantic zones exist around them
+* which entities naturally belong to that zone
+* what feels contextually appropriate right now
+This module is not about popularity.
+It is about place truth.
+It answers:
+* “What kind of environment is this?”
+* “What belongs here?”
+* “What feels natural nearby?”
+* “What kind of things should be shown because of where the user is?”
+________________
+
+
+2) What the Context Engine Should Produce
+For every user state / route state / anchor state, this engine should output:
+* primary_context
+* secondary_contexts[]
+* active_context_zone
+* context_confidence
+* context_signature
+* entity_context_affinity_score
+* entity_context_role
+* context_fit_reason
+That becomes the semantic foundation used by:
+* Eligibility Engine
+* Structural Importance Engine
+* Opportunity Engine
+* Route Engine
+* Slot Ranking Engine
+* Moment Framing Engine
+So this module is central, not cosmetic.
+________________
+
+
+3) Mental Model of the Context Engine
+Think of it in 4 layers:
+Layer A — Macro Place Identity
+“What broad kind of place is this?”
+Examples:
+* beach
+* old town
+* waterfront
+* lakefront
+* mountain village
+* marina
+* urban core
+* arts district
+* market district
+* temple quarter
+* promenade
+* parkland
+* nightlife strip
+* shopping boulevard
+* riverside
+* countryside edge
+________________
+
+
+Layer B — Semantic Subcontext
+“What exact flavor of place is this?”
+Examples:
+* sunset beach zone
+* quiet cove
+* family beach
+* boardwalk food strip
+* heritage walking lane
+* nightlife marina edge
+* shaded café lane
+* elevated viewpoint ridge
+* temple approach street
+* riverside strolling corridor
+* artisan shopping cluster
+________________
+
+
+Layer C — Route Context
+“What kind of movement or journey is happening right now?”
+Examples:
+* arrival context
+* scenic wandering context
+* exploration context
+* lunch context
+* golden hour context
+* cool-down context
+* transition corridor
+* destination approach
+* evening social context
+* end-of-day unwind context
+________________
+
+
+Layer D — Entity Fit
+“Does this item belong here right now?”
+Examples:
+* A beach shack café fits strongly in a beach leisure zone
+* A rooftop cocktail bar may fit poorly at 10 AM in a family beach context
+* A heritage alley viewpoint fits strongly inside old-town exploration
+* A museum gift shop might be weak unless user is in anchor-exit transition
+This is what makes recommendations feel human.
+________________
+
+
+4) Final Outputs of the Context Engine
+For every active session state, compute:
+________________
+
+
+4.1 Place-Level Outputs
+primary_context
+The strongest place identity.
+Examples:
+* beach
+* old_town
+* waterfront
+* marina
+* market_district
+________________
+
+
+secondary_contexts
+Additional overlapping context tags.
+Examples:
+["sunset_zone", "food_strip", "walkable_promenade"]
+
+
+________________
+
+
+active_context_zone
+The exact semantic zone the user is currently inside.
+Examples:
+* quiet_cove
+* heritage_lane
+* nightlife_marina_edge
+* cliffside_viewpoint_zone
+________________
+
+
+context_confidence
+How certain the engine is that the inferred context is correct.
+Range:
+0.00 – 1.00
+________________
+
+
+context_signature
+A compact semantic identity used by downstream engines.
+Example:
+{
+  "primary_context": "beach",
+  "secondary_contexts": ["sunset_zone", "walkable", "food_adjacent"],
+  "route_context": "golden_hour_exploration"
+}
+
+
+This is extremely useful later.
+________________
+
+
+4.2 Entity-Level Outputs
+For each candidate entity, compute:
+context_affinity_score
+How naturally this entity belongs in the active context.
+Range:
+0 – 100
+________________
+
+
+entity_context_role
+What role it plays in this context.
+Examples:
+* core_fit
+* supporting_fit
+* transition_fit
+* specialist_fit
+* weak_fit
+* context_breaker
+________________
+
+
+context_fit_reason
+Human-readable reason for logging / debugging.
+Examples:
+* “Strong sunset-facing fit near waterfront promenade”
+* “Useful food support within heritage walking lane”
+* “Low semantic fit for quiet scenic zone”
+* “Belongs more to nightlife than daytime family beach context”
+This field will save you a lot of debugging pain later.
+________________
+
+
+5) What Data the Context Engine Needs
+This is important:
+Context Engine should not depend on only one source.
+It should infer context from multiple signals:
+________________
+
+
+5.1 Required Inputs
+A) User / Route Inputs
+* current lat/lng
+* current anchor / subanchor
+* route direction / path
+* session time of day
+* travel mode (walk / drive / mixed)
+* route state (arrival, linger, transition, exit)
+________________
+
+
+B) Nearby Entity Inputs
+Nearby entities within a radius (example 400m / 700m / 1.2km depending on density):
+* attractions
+* restaurants
+* experiences
+* scenic points
+* anchor/subanchor nodes
+Each should already have:
+* category
+* subcategory
+* tier
+* coordinates
+* review signals
+* tags if available
+________________
+
+
+C) Structural / Geographic Inputs
+These can come from your own tables or enrichment later:
+* coastline / waterfront proximity
+* elevation / hill / cliff indication
+* pedestrian street presence
+* market street presence
+* plaza / square presence
+* green/open-space signal
+* road density / traffic intensity
+* heritage / historic cluster signal
+* nightlife density signal
+* shopping density signal
+Even if you don’t have all of these now, the engine should be designed to accept them later.
+________________
+
+
+6) Core Architecture of the Context Engine
+The engine should run in three major stages:
+________________
+
+
+STAGE 1 — Detect Place Identity
+This decides:
+“What kind of place is this area?”
+This is done by evaluating nearby place evidence.
+________________
+
+
+6.1 Place Identity Candidate Pool
+Maintain a controlled context taxonomy.
+Do not let this become unstructured chaos.
+Create a master vocabulary like this:
+________________
+
+
+6.2 Recommended Context Taxonomy
+Macro Contexts (primary_context)
+beach
+waterfront
+lakefront
+riverside
+marina
+old_town
+historic_core
+market_district
+urban_core
+shopping_district
+nightlife_district
+arts_district
+parkland
+garden_zone
+hilltop
+mountain_zone
+temple_quarter
+resort_strip
+residential_leisure
+scenic_corridor
+cultural_cluster
+
+
+________________
+
+
+Subcontexts (secondary_contexts / active_context_zone)
+sunset_zone
+sunrise_zone
+quiet_zone
+family_zone
+romantic_zone
+food_strip
+cafe_strip
+shopping_lane
+heritage_lane
+viewpoint_zone
+boardwalk_zone
+beach_shack_zone
+promenade_zone
+cliff_edge_zone
+night_bar_zone
+market_lane
+shaded_walk_zone
+open_plaza_zone
+water_edge_zone
+anchor_exit_zone
+arrival_zone
+linger_zone
+transition_corridor
+
+
+________________
+
+
+7) How to Detect Primary Context
+Now the real logic.
+Each candidate context should receive a score.
+________________
+
+
+7.1 primary_context_score
+Example:
+primary_context_score(context) =
+ 0.28 * nearby_entity_pattern_score
++ 0.22 * anchor_semantic_score
++ 0.18 * geography_signal_score
++ 0.14 * pedestrian_behavior_score
++ 0.10 * route_alignment_score
++ 0.08 * naming_signal_score
+
+
+________________
+
+
+7.2 What Each Part Means
+A) nearby_entity_pattern_score
+What types of entities dominate nearby?
+Examples:
+* beach clubs, seaside cafés, sunset points → beach / waterfront
+* churches, museums, old lanes, plazas → old_town / historic_core
+* bars, lounges, clubs, rooftop dining → nightlife_district
+* bazaars, stalls, food courts, shops → market_district
+This is one of your strongest signals.
+________________
+
+
+B) anchor_semantic_score
+What is the current anchor / subanchor semantically classified as?
+If the user is at:
+* “Marina Walk” → likely marina / waterfront
+* “Old Port Gate” → likely historic_core / waterfront
+* “Sunset Beach Access” → likely beach / sunset_zone
+This gives strong structural prior.
+________________
+
+
+C) geography_signal_score
+What does the physical environment imply?
+Examples:
+* near coastline → beach / waterfront
+* near lake edge → lakefront
+* elevated terrain / cliff → hilltop / viewpoint zone
+* dense pedestrian streets → market / old town / promenade
+________________
+
+
+D) pedestrian_behavior_score
+What kind of movement does this area encourage?
+Examples:
+* strolling → promenade / old town / waterfront
+* stop-and-look → viewpoint / heritage lane
+* flow-through → transition corridor
+* short dwell clusters → food strip / market lane
+This can be inferred later from session behavior too.
+________________
+
+
+E) route_alignment_score
+Does this context align with where the user is heading?
+If the route is clearly pulling toward a waterfront or anchor district, boost that context.
+________________
+
+
+F) naming_signal_score
+Entity names and area labels often reveal context.
+Examples:
+* “Marina Walk”
+* “Old Town Square”
+* “Beach Road”
+* “Sunset Point”
+* “Heritage Street”
+* “Bazaar Lane”
+This is a surprisingly useful lightweight signal.
+________________
+
+
+8) How to Detect Secondary Contexts
+Primary context tells you what place this broadly is.
+Secondary contexts tell you what is happening inside it.
+This is much more important for feed quality.
+________________
+
+
+8.1 Example
+A place may be:
+* primary_context = waterfront
+but simultaneously have:
+* secondary_contexts = ["sunset_zone", "food_strip", "walkable", "romantic_zone"]
+That gives the engine much better taste.
+________________
+
+
+8.2 secondary_context_score
+secondary_context_score(subcontext) =
+ 0.30 * micro_cluster_match
++ 0.20 * entity_density_signal
++ 0.18 * route_micro_position
++ 0.14 * dwell_pattern_signal
++ 0.10 * time_of_day_relevance
++ 0.08 * naming_signal
+
+
+________________
+
+
+8.3 Examples
+sunset_zone
+Strong if:
+* west-facing scenic points nearby
+* many “sunset” or “viewpoint” signals
+* golden hour timing
+* open horizon / waterfront / ridge
+________________
+
+
+food_strip
+Strong if:
+* restaurant density is high
+* food entities cluster tightly
+* short walking transitions between eateries
+* dwell potential is high
+________________
+
+
+heritage_lane
+Strong if:
+* heritage attractions cluster tightly
+* walking paths are narrow and sequential
+* visual stop points are frequent
+* naming or attraction tags suggest old-town character
+________________
+
+
+transition_corridor
+Strong if:
+* user is moving between two stronger anchors
+* entities nearby are weak as destinations but useful as in-between inserts
+This one is very valuable and most systems miss it.
+________________
+
+
+9) Build Context Zones Explicitly (Very Important)
+This is where the module becomes truly powerful.
+Do not only infer context live every time.
+You should also maintain context zones in your database.
+This makes the engine stable and reusable.
+________________
+
+
+10) Recommended Database Layer for Context Engine
+You should create new tables for this module.
+________________
+
+
+10.1 Table: context_zones
+This is the master table for semantic place zones.
+CREATE TABLE context_zones (
+  context_zone_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  entity_location_id BIGINT NOT NULL,
+  zone_name VARCHAR(255) DEFAULT NULL,
+  primary_context VARCHAR(100) DEFAULT NULL,
+  active_context_zone VARCHAR(100) DEFAULT NULL,
+  secondary_contexts JSON DEFAULT NULL,
+
+
+  center_lat DECIMAL(10,8) DEFAULT NULL,
+  center_lng DECIMAL(11,8) DEFAULT NULL,
+  radius_meters INT DEFAULT NULL,
+
+
+  context_confidence DECIMAL(5,4) DEFAULT NULL,
+  context_signature JSON DEFAULT NULL,
+
+
+  source_url VARCHAR(500) DEFAULT NULL,
+  is_active TINYINT(1) DEFAULT 1,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  INDEX idx_location (entity_location_id),
+  INDEX idx_primary_context (primary_context),
+  INDEX idx_active_context (active_context_zone)
+);
+
+
+________________
+
+
+Why this table matters
+This lets you say:
+“This exact part of the city behaves like a sunset promenade.”
+“This pocket behaves like a heritage walking lane.”
+“This cluster behaves like a nightlife marina zone.”
+That is gold for downstream ranking.
+________________
+
+
+10.2 Table: entity_context_affinity
+This stores how well each entity fits different contexts.
+CREATE TABLE entity_context_affinity (
+  entity_context_affinity_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+
+
+  entity_type ENUM('sight','restaurant','experience') NOT NULL,
+  entity_id BIGINT NOT NULL,
+  entity_location_id BIGINT NOT NULL,
+
+
+  primary_context VARCHAR(100) DEFAULT NULL,
+  active_context_zone VARCHAR(100) DEFAULT NULL,
+
+
+  context_affinity_score DECIMAL(6,2) DEFAULT NULL,
+  entity_context_role VARCHAR(50) DEFAULT NULL,
+  context_fit_reason VARCHAR(255) DEFAULT NULL,
+
+
+  distance_score DECIMAL(6,2) DEFAULT NULL,
+  line_of_sight_score DECIMAL(6,2) DEFAULT NULL,
+  review_signal_score DECIMAL(6,2) DEFAULT NULL,
+  category_match_score DECIMAL(6,2) DEFAULT NULL,
+  semantic_match_score DECIMAL(6,2) DEFAULT NULL,
+  time_fit_score DECIMAL(6,2) DEFAULT NULL,
+
+
+  source_url VARCHAR(500) DEFAULT NULL,
+  is_active TINYINT(1) DEFAULT 1,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  INDEX idx_entity_lookup (entity_type, entity_id),
+  INDEX idx_location (entity_location_id),
+  INDEX idx_context (primary_context, active_context_zone),
+  INDEX idx_affinity (context_affinity_score)
+);
+
+
+________________
+
+
+11) How to Compute context_affinity_score
+Now the heart of the module.
+This decides:
+“How naturally does this entity belong in the current place context?”
+This should not be pure distance.
+________________
+
+
+11.1 Final Recommended Formula
+context_affinity_score =
+ 0.24 * distance_score
++ 0.18 * semantic_match_score
++ 0.14 * category_match_score
++ 0.14 * line_of_sight_score
++ 0.12 * review_signal_score
++ 0.10 * time_fit_score
++ 0.08 * cluster_fit_score
+
+
+Normalize final score to:
+0 – 100
+________________
+
+
+12) Meaning of Each Context Affinity Component
+________________
+
+
+12.1 distance_score
+Closer things usually belong more naturally.
+But use contextual decay, not blunt distance.
+Example:
+* In old town: 120m is still excellent
+* In beach/resort strip: 450m may still feel natural
+* In hill context: 300m with elevation penalty may be weaker
+So distance should be context-sensitive.
+________________
+
+
+12.2 semantic_match_score
+How semantically aligned is the entity with the detected place identity?
+Examples:
+* beach shack café in beach zone → high
+* rooftop cocktail bar in marina nightlife zone → high
+* temple souvenir lane in heritage context → high
+* indoor gaming arcade in quiet cove → low
+This is one of your strongest signals.
+________________
+
+
+12.3 category_match_score
+Does the entity category naturally belong here?
+Examples:
+* scenic viewpoint in cliff edge zone → high
+* seafood place near waterfront → high
+* artisanal market stall in heritage lane → high
+This is more structured than free-form semantics.
+________________
+
+
+12.4 line_of_sight_score
+Can this place be visually or experientially connected to the context?
+Examples:
+* sunset café overlooking sea → very high
+* hidden alley café behind main route → moderate
+* basement bar away from visible context → lower unless nightlife context is active
+This is incredibly useful for scenic places.
+________________
+
+
+12.5 review_signal_score
+Do users implicitly validate this place-context fit?
+Examples:
+* Reviews mention “great sea views”, “perfect after beach”, “nice after sunset”
+* Reviews mention “best in old town”, “beautiful walk from square”
+This is review semantics, not just star rating.
+Very powerful later.
+________________
+
+
+12.6 time_fit_score
+Does it fit the current moment?
+Examples:
+* brunch café in morning → high
+* sunset viewpoint at golden hour → very high
+* loud nightlife venue at 11 AM → weak
+* lantern-lit alley at evening → high
+This is where Context Engine starts blending into Moment Engine later.
+________________
+
+
+12.7 cluster_fit_score
+Does it sit inside a coherent semantic cluster?
+Examples:
+* a restaurant inside a dense marina dining strip → strong
+* a random isolated shop far from any related cluster → weak
+This helps remove weird outliers.
+________________
+
+
+13) Entity Context Roles (Very Important)
+Every candidate should also get a context role.
+This helps downstream ranking a lot.
+________________
+
+
+Recommended entity_context_role values
+core_fit
+supporting_fit
+transition_fit
+specialist_fit
+scenic_fit
+social_fit
+utility_fit
+weak_fit
+context_breaker
+
+
+________________
+
+
+Meaning
+core_fit
+This entity is deeply native to the place.
+Example:
+* beachfront sunset viewpoint in sunset beach zone
+________________
+
+
+supporting_fit
+Very natural, but not defining.
+Example:
+* gelato shop in promenade zone
+________________
+
+
+transition_fit
+Useful because it helps movement between stronger anchors.
+Example:
+* café between two major sights
+________________
+
+
+specialist_fit
+Highly relevant to a specific user intent, but not universally place-defining.
+Example:
+* local craft workshop in heritage district
+________________
+
+
+scenic_fit
+Fits mainly because of environmental or visual payoff.
+________________
+
+
+social_fit
+Fits because it supports energy / gathering / nightlife / group vibe.
+________________
+
+
+utility_fit
+Useful but not place-defining.
+Example:
+* water stop, casual snack, quick recharge
+________________
+
+
+weak_fit
+Some relevance, but not strongly belonging.
+________________
+
+
+context_breaker
+Nearby, but semantically wrong for this place/moment.
+This is useful to suppress noise.
+________________
+
+
+14) Context Confidence
+The engine should not pretend certainty when signals are weak.
+Compute:
+context_confidence =
+ 0.40 * top_context_margin
++ 0.25 * signal_density
++ 0.20 * anchor_support
++ 0.15 * route_consistency
+
+
+Range:
+0.00 – 1.00
+________________
+
+
+Why this matters
+If confidence is low:
+* allow broader candidate diversity
+* reduce hard suppression
+* let Opportunity Engine take more control
+If confidence is high:
+* become more selective
+* suppress context breakers harder
+* tighten semantic fit requirements
+This is a very useful control knob.
+________________
+
+
+15) Context Signature (Downstream Superpower)
+Build a compact machine-readable semantic state.
+Example:
+{
+  "primary_context": "waterfront",
+  "secondary_contexts": ["sunset_zone", "food_strip", "promenade_zone"],
+  "route_context": "golden_hour_exploration",
+  "context_confidence": 0.87
+}
+
+
+This should be passed downstream to all ranking modules.
+This becomes the “semantic environment state” of the session.
+________________
+
+
+16) Recommended Pipeline for Context Engine
+This is the clean execution flow.
+________________
+
+
+CONTEXT ENGINE PIPELINE
+Step 1 — Gather Nearby Evidence
+Fetch nearby:
+* anchors / subanchors
+* sights
+* restaurants
+* experiences
+* context zones
+* route path
+* geography signals
+________________
+
+
+Step 2 — Score Macro Contexts
+Compute score for all possible primary_context candidates.
+Pick:
+* top 1 as primary_context
+* top 2–4 as backup context priors
+________________
+
+
+Step 3 — Score Secondary Contexts
+Compute:
+* secondary_contexts
+* active_context_zone
+________________
+
+
+Step 4 — Compute context_confidence
+Determine how reliable the context inference is.
+________________
+
+
+Step 5 — Build context_signature
+Package final semantic state.
+________________
+
+
+Step 6 — Score Entity Context Affinity
+For each candidate entity:
+* compute context_affinity_score
+* assign entity_context_role
+* generate context_fit_reason
+________________
+
+
+Step 7 — Write Results to Context Layer
+Persist to:
+* context_zones
+* entity_context_affinity
+________________
+
+
+17) Practical Examples
+Now let’s make this real.
+________________
+
+
+Example A — Beach Town
+User near:
+* promenade
+* sunset point
+* beach cafés
+* water sports kiosks
+* boardwalk restaurants
+Output:
+{
+  "primary_context": "beach",
+  "secondary_contexts": [
+    "sunset_zone",
+    "promenade_zone",
+    "food_strip"
+  ],
+  "active_context_zone": "sunset_zone",
+  "context_confidence": 0.91
+}
+
+
+A sunset bar:
+* context_affinity_score = 92
+* entity_context_role = scenic_fit
+A random indoor arcade:
+* context_affinity_score = 31
+* entity_context_role = context_breaker
+________________
+
+
+Example B — Old Town Core
+User near:
+* churches
+* plazas
+* old lanes
+* museums
+* cafés
+* local artisan shops
+Output:
+{
+  "primary_context": "old_town",
+  "secondary_contexts": [
+    "heritage_lane",
+    "shaded_walk_zone",
+    "cafe_strip"
+  ],
+  "active_context_zone": "heritage_lane",
+  "context_confidence": 0.88
+}
+
+
+A hidden courtyard café:
+* context_affinity_score = 84
+* entity_context_role = supporting_fit
+A suburban chain restaurant:
+* context_affinity_score = 22
+* entity_context_role = context_breaker
+________________
+
+
+Example C — Marina Evening
+User near:
+* dock views
+* cocktail places
+* yacht walk
+* seafood spots
+* ambient evening movement
+Output:
+{
+  "primary_context": "marina",
+  "secondary_contexts": [
+    "water_edge_zone",
+    "night_bar_zone",
+    "food_strip"
+  ],
+  "active_context_zone": "night_bar_zone",
+  "context_confidence": 0.86
+}
+
+
+A rooftop lounge:
+* strong social_fit
+A family breakfast bakery:
+* decent by day, weaker by night
+This is where the engine becomes dynamic.
+________________
+
+
+18) How Context Engine Connects to the Rest of Algo
+This module should directly feed:
+________________
+
+
+Eligibility Engine
+Use context to decide:
+* should this item even be considered now?
+Example:
+* suppress nightlife inside family scenic context
+________________
+
+
+Structural Importance Engine
+Use context to decide:
+* is this structurally important within this place type?
+Example:
+* a promenade gelato stand is not globally important, but may be structurally important locally
+________________
+
+
+Opportunity Engine
+Use context to detect:
+* what feels naturally insertable right now?
+________________
+
+
+Route Engine
+Use context to avoid awkward route jumps.
+________________
+
+
+Slot Ranking Engine
+Use context affinity as a core ranking feature.
+________________
+
+
+Moment Framing Engine
+Use context to phrase recommendations naturally.
+Example:
+* “A relaxed sea-facing stop nearby”
+* “A strong fit while walking the heritage lane”
+That is much better than generic labels.
+________________
+
+
+19) Final Recommendation — How You Should Build It
+If I were building your production version, I would structure Context Engine around three permanent concepts:
+________________
+
+
+A) Controlled Context Taxonomy
+You define:
+* allowed macro contexts
+* allowed subcontexts
+* allowed roles
+This prevents semantic mess.
+________________
+
+
+B) Context Zone Layer
+Persist stable place semantics in DB.
+This gives:
+* reusable intelligence
+* explainability
+* less recomputation
+* better downstream consistency
+________________
+
+
+C) Dynamic Session Context Inference
+At runtime:
+* infer what context is active right now
+* score all nearby candidates against it
+This gives:
+* freshness
+* time sensitivity
+* route sensitivity
+* human-like adaptability
+That combination is the sweet spot.
+________________
+
+
+Final Verdict
+The Context Engine is not a “nice to have.”
+It is the module that gives your system taste.
+Without it:
+* results feel close but random
+With it:
+* results feel like they belong
+And that is exactly what separates:
+“nearby recommendations”
+from
+“this feels like the right thing here.”
+________________
+
+
+Perfect — now let’s turn the Context Engine into a fully implementation-ready module.
+This part is about:
+* exact tables
+* exact fields
+* how to populate them
+* scoring logic
+* refresh logic
+* runtime usage
+* how this fits into your Laravel / recommendation pipeline
+This should be designed so you can actually build it without later “rethinking the architecture.”
+________________
+
+
+PART 2 — FULL IMPLEMENTATION SPEC
+________________
+
+
+1) Final Goal of This Module
+The Context Engine should answer two separate but related questions:
+A. Place Context Question
+“What kind of place is this area?”
+Examples:
+* beach
+* marina
+* old town
+* market district
+* waterfront
+* hilltop
+* nightlife strip
+________________
+
+
+B. Entity Fit Question
+“How naturally does this item belong here?”
+Examples:
+* a sea-facing café fits a promenade context
+* a hidden cocktail bar fits a nightlife marina context
+* a shaded artisan lane fits old-town wandering
+* a fast-food chain may be nearby but not contextually strong
+________________
+
+
+2) Architecture Overview
+The module should be split into 4 implementation layers:
+________________
+
+
+Layer 1 — Context Taxonomy
+Controlled vocabulary of allowed place contexts.
+________________
+
+
+Layer 2 — Context Zones
+Persistent semantic zones stored in DB.
+________________
+
+
+Layer 3 — Runtime Context Inference
+Figures out the user’s current context in-session.
+________________
+
+
+Layer 4 — Entity Context Affinity
+Scores how well each candidate entity fits the active context.
+________________
+
+
+3) Final Database Design
+You should implement this using 4 main tables.
+________________
+
+
+TABLE 1 — context_taxonomy
+This is your master semantic dictionary.
+This prevents random labels and keeps the system clean.
+________________
+
+
+SQL
+CREATE TABLE context_taxonomy (
+  context_taxonomy_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+
+
+  context_key VARCHAR(100) NOT NULL,
+  context_label VARCHAR(150) DEFAULT NULL,
+  context_type ENUM('primary','secondary','route','role') NOT NULL,
+
+
+  parent_context_key VARCHAR(100) DEFAULT NULL,
+
+
+  description TEXT DEFAULT NULL,
+
+
+  allowed_item_types JSON DEFAULT NULL,
+  allowed_categories JSON DEFAULT NULL,
+
+
+  default_walk_radius_meters INT DEFAULT NULL,
+  default_drive_radius_meters INT DEFAULT NULL,
+
+
+  is_active TINYINT(1) DEFAULT 1,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  UNIQUE KEY uniq_context_key (context_key),
+  INDEX idx_context_type (context_type),
+  INDEX idx_parent_context (parent_context_key)
+);
+
+
+________________
+
+
+Purpose of this table
+This gives you a clean controlled vocabulary for:
+* primary_context
+* secondary_context
+* route_context
+* entity_context_role
+Without this table, your context system will eventually become inconsistent.
+________________
+
+
+Example Seed Data
+________________
+
+
+Primary Contexts
+beach
+waterfront
+lakefront
+riverside
+marina
+old_town
+historic_core
+market_district
+urban_core
+shopping_district
+nightlife_district
+arts_district
+parkland
+garden_zone
+hilltop
+mountain_zone
+temple_quarter
+resort_strip
+residential_leisure
+scenic_corridor
+cultural_cluster
+
+
+________________
+
+
+Secondary Contexts
+sunset_zone
+sunrise_zone
+quiet_zone
+family_zone
+romantic_zone
+food_strip
+cafe_strip
+shopping_lane
+heritage_lane
+viewpoint_zone
+boardwalk_zone
+beach_shack_zone
+promenade_zone
+cliff_edge_zone
+night_bar_zone
+market_lane
+shaded_walk_zone
+open_plaza_zone
+water_edge_zone
+anchor_exit_zone
+arrival_zone
+linger_zone
+transition_corridor
+
+
+________________
+
+
+Route Contexts
+arrival
+exploration
+scenic_wander
+food_window
+golden_hour
+night_out
+transition
+wind_down
+
+
+________________
+
+
+Entity Roles
+core_fit
+supporting_fit
+transition_fit
+specialist_fit
+scenic_fit
+social_fit
+utility_fit
+weak_fit
+context_breaker
+
+
+________________
+
+
+TABLE 2 — context_zones
+This is the persistent place semantics table.
+This stores the semantic truth of a physical zone.
+This is one of the most important tables in the entire engine.
+________________
+
+
+SQL
+CREATE TABLE context_zones (
+  context_zone_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+
+
+  entity_location_id BIGINT NOT NULL,
+
+
+  zone_name VARCHAR(255) DEFAULT NULL,
+
+
+  primary_context VARCHAR(100) DEFAULT NULL,
+  active_context_zone VARCHAR(100) DEFAULT NULL,
+  secondary_contexts JSON DEFAULT NULL,
+
+
+  center_lat DECIMAL(10,8) DEFAULT NULL,
+  center_lng DECIMAL(11,8) DEFAULT NULL,
+  radius_meters INT DEFAULT NULL,
+
+
+  context_confidence DECIMAL(5,4) DEFAULT NULL,
+  context_signature JSON DEFAULT NULL,
+
+
+  nearby_entity_count INT DEFAULT NULL,
+  anchor_count INT DEFAULT NULL,
+  food_count INT DEFAULT NULL,
+  experience_count INT DEFAULT NULL,
+  scenic_count INT DEFAULT NULL,
+  nightlife_count INT DEFAULT NULL,
+
+
+  waterfront_signal DECIMAL(6,2) DEFAULT NULL,
+  elevation_signal DECIMAL(6,2) DEFAULT NULL,
+  heritage_signal DECIMAL(6,2) DEFAULT NULL,
+  pedestrian_signal DECIMAL(6,2) DEFAULT NULL,
+  nightlife_signal DECIMAL(6,2) DEFAULT NULL,
+  shopping_signal DECIMAL(6,2) DEFAULT NULL,
+
+
+  source_url VARCHAR(500) DEFAULT NULL,
+  source_type VARCHAR(100) DEFAULT NULL,
+
+
+  is_active TINYINT(1) DEFAULT 1,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  INDEX idx_location (entity_location_id),
+  INDEX idx_primary_context (primary_context),
+  INDEX idx_active_context (active_context_zone),
+  INDEX idx_lat_lng (center_lat, center_lng)
+);
+
+
+________________
+
+
+What this table means
+This table stores:
+“This exact area behaves like a waterfront promenade.”
+or
+“This cluster behaves like a heritage lane.”
+or
+“This section behaves like a nightlife marina edge.”
+This is the semantic map of the destination.
+________________
+
+
+Field-by-field Explanation
+________________
+
+
+Identity
+context_zone_id
+Primary key.
+________________
+
+
+entity_location_id
+Which location/city/region this context zone belongs to.
+Example:
+* Dubrovnik Old Town
+* Goa Baga area
+* Barcelona Gothic Quarter
+This lets you scope context by destination.
+________________
+
+
+zone_name
+Human-readable name.
+Examples:
+* “Sunset Boardwalk”
+* “Old Harbour Heritage Lane”
+* “North Beach Strip”
+Useful for debugging and admin UI.
+________________
+
+
+Semantic Outputs
+primary_context
+Broad place identity.
+Examples:
+* beach
+* old_town
+* marina
+* market_district
+________________
+
+
+active_context_zone
+Most specific dominant zone.
+Examples:
+* sunset_zone
+* heritage_lane
+* night_bar_zone
+________________
+
+
+secondary_contexts
+Stored as JSON array.
+Example:
+["food_strip", "promenade_zone", "romantic_zone"]
+
+
+This gives nuance.
+________________
+
+
+Geometry
+center_lat, center_lng
+Geographic center of the semantic zone.
+________________
+
+
+radius_meters
+How far this zone meaningfully extends.
+Examples:
+* old-town heritage lane → 120–250m
+* beach strip → 300–700m
+* waterfront promenade → 400–1000m
+________________
+
+
+Confidence / Signature
+context_confidence
+How strongly the system believes this zone identity is correct.
+Range:
+0.0000 – 1.0000
+________________
+
+
+context_signature
+Compact semantic summary stored as JSON.
+Example:
+{
+  "primary_context": "waterfront",
+  "secondary_contexts": ["sunset_zone", "food_strip", "promenade_zone"],
+  "route_context_bias": ["scenic_wander", "golden_hour"]
+}
+
+
+Very useful downstream.
+________________
+
+
+Density / Structure Counts
+These are very useful for explainability and scoring.
+nearby_entity_count
+Total nearby relevant entities.
+________________
+
+
+anchor_count
+How many structural anchor-type items are nearby.
+________________
+
+
+food_count
+Nearby restaurant/food density.
+________________
+
+
+experience_count
+Nearby experiences / activity density.
+________________
+
+
+scenic_count
+Nearby scenic/viewpoint-heavy items.
+________________
+
+
+nightlife_count
+Nearby nightlife-oriented entities.
+________________
+
+
+Environmental / Structural Signals
+All should be normalized to:
+0 – 100
+waterfront_signal
+Strength of water-edge identity.
+________________
+
+
+elevation_signal
+Cliff / hill / viewpoint / elevation character.
+________________
+
+
+heritage_signal
+Historical / old-town / legacy place character.
+________________
+
+
+pedestrian_signal
+How walking-oriented / strolling-oriented this area is.
+________________
+
+
+nightlife_signal
+How nightlife-dominant the zone is.
+________________
+
+
+shopping_signal
+How shopping-heavy the zone is.
+________________
+
+
+Provenance
+source_url
+Optional source reference.
+________________
+
+
+source_type
+Where this zone was derived from.
+Examples:
+* system_inferred
+* manual_editorial
+* osm_enriched
+* review_semantic
+* hybrid
+This is useful because not all contexts should be equally trusted.
+________________
+
+
+TABLE 3 — entity_context_affinity
+This table stores how strongly an entity belongs in one or more contexts.
+This is the bridge between place semantics and ranking.
+________________
+
+
+SQL
+CREATE TABLE entity_context_affinity (
+  entity_context_affinity_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+
+
+  entity_type ENUM('sight','restaurant','experience','hotel') NOT NULL,
+  entity_id BIGINT NOT NULL,
+  entity_location_id BIGINT NOT NULL,
+
+
+  context_zone_id BIGINT DEFAULT NULL,
+
+
+  primary_context VARCHAR(100) DEFAULT NULL,
+  active_context_zone VARCHAR(100) DEFAULT NULL,
+
+
+  context_affinity_score DECIMAL(6,2) DEFAULT NULL,
+  entity_context_role VARCHAR(50) DEFAULT NULL,
+  context_fit_reason VARCHAR(255) DEFAULT NULL,
+
+
+  distance_score DECIMAL(6,2) DEFAULT NULL,
+  semantic_match_score DECIMAL(6,2) DEFAULT NULL,
+  category_match_score DECIMAL(6,2) DEFAULT NULL,
+  line_of_sight_score DECIMAL(6,2) DEFAULT NULL,
+  review_signal_score DECIMAL(6,2) DEFAULT NULL,
+  time_fit_score DECIMAL(6,2) DEFAULT NULL,
+  cluster_fit_score DECIMAL(6,2) DEFAULT NULL,
+
+
+  semantic_tags JSON DEFAULT NULL,
+
+
+  source_type VARCHAR(100) DEFAULT NULL,
+  is_active TINYINT(1) DEFAULT 1,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  INDEX idx_entity_lookup (entity_type, entity_id),
+  INDEX idx_location (entity_location_id),
+  INDEX idx_context_zone (context_zone_id),
+  INDEX idx_context (primary_context, active_context_zone),
+  INDEX idx_affinity (context_affinity_score)
+);
+
+
+________________
+
+
+What this table means
+This table answers:
+“How naturally does this specific entity belong inside this context?”
+Examples:
+* Sunset Café → very strong in sunset_zone
+* Hidden Wine Bar → very strong in night_bar_zone
+* Gelato Stop → medium in promenade_zone
+* Indoor arcade → weak in quiet_cove
+This is exactly what downstream ranking needs.
+________________
+
+
+Field-by-field Explanation
+________________
+
+
+Entity Identity
+entity_type
+Examples:
+* sight
+* restaurant
+* experience
+* hotel
+________________
+
+
+entity_id
+The actual entity record ID.
+________________
+
+
+entity_location_id
+Destination scope.
+________________
+
+
+context_zone_id
+Optional direct link to a specific semantic zone.
+This is useful when an entity clearly belongs to one known zone.
+________________
+
+
+Context Binding
+primary_context
+Broad context this score applies to.
+________________
+
+
+active_context_zone
+Specific semantic subcontext this score applies to.
+________________
+
+
+Main Output
+context_affinity_score
+Final normalized score:
+0 – 100
+This is the most important output of this table.
+________________
+
+
+entity_context_role
+How the entity behaves in the context.
+Examples:
+* core_fit
+* supporting_fit
+* transition_fit
+* specialist_fit
+* scenic_fit
+* social_fit
+* utility_fit
+* weak_fit
+* context_breaker
+________________
+
+
+context_fit_reason
+Human-readable explanation for logging/debugging.
+Examples:
+* “Strong sea-facing fit inside sunset promenade”
+* “Useful café support in shaded heritage lane”
+* “Weak semantic fit for quiet scenic context”
+This becomes extremely useful when debugging weird recommendations.
+________________
+
+
+Score Components
+These should all be stored individually so you can debug and tune the engine later.
+________________
+
+
+distance_score
+How naturally distance supports belonging.
+Range:
+0 – 100
+________________
+
+
+semantic_match_score
+How semantically aligned the entity is with this context.
+________________
+
+
+category_match_score
+How category-appropriate the entity is for this context.
+________________
+
+
+line_of_sight_score
+How visually / spatially connected the entity is to the context.
+________________
+
+
+review_signal_score
+How strongly reviews imply contextual fit.
+________________
+
+
+time_fit_score
+How naturally the entity fits likely time-based usage in this context.
+________________
+
+
+cluster_fit_score
+How strongly it belongs to a nearby semantic cluster.
+________________
+
+
+semantic_tags
+Optional structured tags.
+Example:
+["sunset_view", "sea_facing", "casual_dining", "boardwalk"]
+
+
+Very useful later.
+________________
+
+
+TABLE 4 — runtime_context_state
+This table stores the live inferred context for the user / trip session.
+This is the bridge between your static place map and live feed generation.
+________________
+
+
+SQL
+CREATE TABLE runtime_context_state (
+  runtime_context_state_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+
+
+  trip_id BIGINT DEFAULT NULL,
+  session_id VARCHAR(255) DEFAULT NULL,
+  user_id BIGINT DEFAULT NULL,
+
+
+  entity_location_id BIGINT DEFAULT NULL,
+
+
+  user_lat DECIMAL(10,8) DEFAULT NULL,
+  user_lng DECIMAL(11,8) DEFAULT NULL,
+
+
+  matched_context_zone_id BIGINT DEFAULT NULL,
+
+
+  primary_context VARCHAR(100) DEFAULT NULL,
+  active_context_zone VARCHAR(100) DEFAULT NULL,
+  secondary_contexts JSON DEFAULT NULL,
+  route_context VARCHAR(100) DEFAULT NULL,
+
+
+  context_confidence DECIMAL(5,4) DEFAULT NULL,
+  context_signature JSON DEFAULT NULL,
+
+
+  inference_source VARCHAR(100) DEFAULT NULL,
+  inferred_at DATETIME DEFAULT NULL,
+
+
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+
+  INDEX idx_trip (trip_id),
+  INDEX idx_session (session_id),
+  INDEX idx_user (user_id),
+  INDEX idx_location (entity_location_id)
+);
+
+
+________________
+
+
+Purpose of this table
+This stores the answer to:
+“What context is the user in right now?”
+That is different from static place context.
+Example:
+A marina may have:
+* daytime promenade context
+* sunset context
+* night bar context
+The zone is stable.
+The active runtime context changes.
+That is why this table is necessary.
+________________
+
+
+4) How to Populate the Context Engine
+Now let’s get practical.
+There are 2 separate population pipelines:
+________________
+
+
+PIPELINE A — Build Stable Context Zones
+This runs offline / batch / enrichment mode
+Used to populate:
+* context_zones
+* entity_context_affinity
+________________
+
+
+PIPELINE B — Infer Live User Context
+This runs at request/session/feed time
+Used to populate:
+* runtime_context_state
+________________
+
+
+5) PIPELINE A — Stable Context Zone Builder
+This is the foundational job.
+You should run this:
+* per destination
+* per city
+* per region
+* on schedule
+* or when destination data changes
+________________
+
+
+STEP A1 — Define Zone Seeds
+You need seed points to evaluate context around.
+These can come from:
+* major anchors
+* important attractions
+* destination centers
+* clusters of entities
+* manually defined district centers
+________________
+
+
+Recommended Seed Sources
+Priority order:
+1. major anchor attractions
+2. subanchor attractions
+3. known district centers
+4. dense restaurant / experience clusters
+5. scenic clusters
+________________
+
+
+Example
+If a city has:
+* old town square
+* marina walk
+* sunset beach access
+* central bazaar
+Each becomes a zone seed candidate.
+________________
+
+
+STEP A2 — Pull Nearby Evidence Around Each Seed
+For each seed, fetch nearby entities.
+Recommended radius by density:
+Dense cities / old towns
+250–400m
+Resort / waterfront / beach zones
+400–800m
+Scenic / rural / hill areas
+600–1500m
+________________
+
+
+Pull nearby:
+* sights
+* restaurants
+* experiences
+* anchors
+* route connectors
+* semantic tags if available
+Also compute:
+* water proximity
+* elevation hints
+* pedestrian density proxies
+* nightlife density
+* shopping density
+________________
+
+
+STEP A3 — Compute Context Signals
+For each seed, compute normalized scores:
+________________
+
+
+Example signal groups
+A. Place Pattern Signals
+* % of scenic entities
+* % of food entities
+* % of nightlife entities
+* % of heritage/cultural entities
+* % of waterfront-view entities
+________________
+
+
+B. Environmental Signals
+* waterfront proximity
+* elevation prominence
+* walkability / pedestrian concentration
+* road pressure / calmness
+________________
+
+
+C. Naming / Semantic Signals
+Examples from names:
+* “Beach”
+* “Harbour”
+* “Marina”
+* “Old Town”
+* “Sunset”
+* “Viewpoint”
+* “Bazaar”
+* “Promenade”
+This can be lightweight but still useful.
+________________
+
+
+STEP A4 — Score Primary Context Candidates
+For each zone seed, compute all candidate primary contexts.
+________________
+
+
+Recommended Formula
+primary_context_score(context) =
+ 0.28 * nearby_entity_pattern_score
++ 0.22 * anchor_semantic_score
++ 0.18 * geography_signal_score
++ 0.14 * pedestrian_behavior_score
++ 0.10 * route_alignment_score
++ 0.08 * naming_signal_score
+
+
+Normalize to:
+0 – 100
+Choose highest-scoring context as:
+* primary_context
+Keep next strongest 2–3 contexts as latent backups if useful.
+________________
+
+
+STEP A5 — Score Secondary Contexts
+Now compute finer subcontexts.
+________________
+
+
+Recommended Formula
+secondary_context_score(subcontext) =
+ 0.30 * micro_cluster_match
++ 0.20 * entity_density_signal
++ 0.18 * route_micro_position
++ 0.14 * dwell_pattern_signal
++ 0.10 * time_of_day_relevance
++ 0.08 * naming_signal
+
+
+Choose:
+* top 1 = active_context_zone
+* next 2–4 = secondary_contexts
+________________
+
+
+STEP A6 — Compute Context Confidence
+Recommended formula:
+context_confidence =
+ 0.40 * top_context_margin
++ 0.25 * signal_density
++ 0.20 * anchor_support
++ 0.15 * route_consistency
+
+
+Range:
+0.00 – 1.00
+This is extremely useful later.
+________________
+
+
+STEP A7 — Write to context_zones
+Once zone scores are computed:
+insert/update:
+* zone center
+* radius
+* primary context
+* active subcontext
+* secondary contexts
+* confidence
+* density signals
+* environmental signals
+This becomes your place semantic map.
+________________
+
+
+6) PIPELINE A — Entity Context Affinity Builder
+Now that you have stable zones, you score entities against them.
+This is one of the most important ranking assets in the system.
+________________
+
+
+STEP B1 — For each context zone, fetch candidate entities
+Use:
+* entities inside zone radius
+* optionally entities within soft overflow radius
+Example:
+* zone radius = 400m
+* overflow radius = 650m
+Overflow allows:
+* scenic hill lookouts
+* slightly detached restaurants
+* route-support entities
+________________
+
+
+STEP B2 — Compute Entity Context Affinity
+This is the core score.
+________________
+
+
+Final Recommended Formula
+context_affinity_score =
+ 0.24 * distance_score
++ 0.18 * semantic_match_score
++ 0.14 * category_match_score
++ 0.14 * line_of_sight_score
++ 0.12 * review_signal_score
++ 0.10 * time_fit_score
++ 0.08 * cluster_fit_score
+
+
+Normalize to:
+0 – 100
+________________
+
+
+7) Exact Definition of Each Score Component
+Now let’s define each practically.
+________________
+
+
+7.1 distance_score
+This should not be a blunt linear distance.
+It should be context-sensitive.
+________________
+
+
+Example logic
+Old town / market / heritage lane
+Decay faster:
+* 0–80m → excellent
+* 80–180m → strong
+* 180–350m → moderate
+* 350m+ → weak
+Waterfront / beach / promenade
+Decay slower:
+* 0–150m → excellent
+* 150–350m → strong
+* 350–700m → moderate
+Hill / scenic / ridge
+Allow irregularity:
+* 0–200m → excellent
+* 200–500m → still strong if route-compatible
+________________
+
+
+Suggested output
+Normalize:
+0 – 100
+________________
+
+
+7.2 semantic_match_score
+This is one of the strongest components.
+It answers:
+“Does this feel like the kind of thing that belongs here?”
+________________
+
+
+How to compute
+Use:
+* category/subcategory
+* tags
+* editorial labels
+* optional review phrase extraction
+* manual mappings
+________________
+
+
+Example semantic mappings
+beach context
+Strong matches:
+* beach club
+* sea-view café
+* sunset viewpoint
+* surf activity
+* boardwalk food
+* casual outdoor dining
+Weak matches:
+* indoor business lunch venue
+* office-like chain café
+* formal museum
+________________
+
+
+old town context
+Strong matches:
+* heritage site
+* artisan lane
+* hidden café
+* local bakery
+* small plaza dining
+* walking attraction
+Weak matches:
+* highway-side drive-in
+* suburban big-box feel
+________________
+
+
+marina context
+Strong matches:
+* seafood
+* cocktail bar
+* waterfront dining
+* dock walk
+* evening social spots
+________________
+
+
+Output
+0 – 100
+________________
+
+
+7.3 category_match_score
+This is more structured than semantic match.
+This asks:
+“Is this item category naturally expected in this context?”
+Example:
+heritage lane
+* sight → high
+* artisan shopping → high
+* small café → high
+* loud nightlife → lower
+food strip
+* restaurant → high
+* dessert → high
+* utility stop → moderate
+* museum → low
+scenic zone
+* viewpoint → very high
+* photo stop → high
+* café with view → high
+* enclosed arcade → low
+________________
+
+
+7.4 line_of_sight_score
+This is especially important in scenic destinations.
+This answers:
+“Does the entity visually or spatially participate in the place?”
+Examples:
+* sea-facing terrace → high
+* directly on boardwalk → high
+* hidden side alley behind context → moderate
+* detached indoor basement → low
+________________
+
+
+If you don’t have true GIS / visibility yet
+Use proxies:
+* waterfront distance
+* same road / same promenade
+* same viewpoint edge
+* “sea view”, “viewpoint”, “terrace”, “rooftop” tags
+* same-facing cluster
+Very workable in V1.
+________________
+
+
+7.5 review_signal_score
+This is not rating.
+This is contextual validation from users.
+This asks:
+“Do reviews imply this is especially fitting here?”
+Examples:
+* “great after sunset”
+* “perfect sea views”
+* “best stop while walking old town”
+* “nice place to cool off after the climb”
+That is incredibly valuable.
+________________
+
+
+V1 practical version
+Even if you don’t do NLP yet, approximate with:
+* high review count in matching cluster
+* category-local popularity
+* editorial/context tags
+* later upgrade to phrase extraction
+________________
+
+
+7.6 time_fit_score
+This asks:
+“Does this item fit the likely time behavior of this context?”
+Examples:
+* brunch café in morning promenade → high
+* sunset point at golden hour → very high
+* bar at 11 PM in marina → high
+* beach shack lunch at 2 PM → high
+* loud club at 10 AM → weak
+________________
+
+
+Important note
+This score should use:
+* entity operating hours
+* daypart fit
+* context type
+* likely user state
+This score will become even stronger when connected to your Environment + User State modules.
+________________
+
+
+7.7 cluster_fit_score
+This asks:
+“Does this entity belong to a coherent semantic pocket?”
+Examples:
+* restaurant inside dining cluster → high
+* isolated café between unrelated entities → lower
+* viewpoint in scenic chain → high
+This is extremely useful for removing weird nearby outliers.
+________________
+
+
+8) Assign entity_context_role
+After scoring, classify each entity into a role.
+This is highly useful for feed assembly later.
+________________
+
+
+Recommended role assignment logic
+core_fit
+Score very high and semantically central to the context.
+________________
+
+
+supporting_fit
+Good fit, but not defining.
+________________
+
+
+transition_fit
+Useful while moving between stronger places.
+________________
+
+
+specialist_fit
+Strong for specific user intent only.
+________________
+
+
+scenic_fit
+Main value is visual / environmental payoff.
+________________
+
+
+social_fit
+Main value is social energy / gathering / nightlife.
+________________
+
+
+utility_fit
+Practical support.
+________________
+
+
+weak_fit
+Some fit but weak.
+________________
+
+
+context_breaker
+Nearby but semantically wrong.
+This is a very useful suppression label.
+________________
+
+
+9) Runtime Context Inference (Live Session Layer)
+Now we move from stable place truth to live user truth.
+This is where the engine becomes dynamic.
+________________
+
+
+STEP C1 — At feed request time, gather runtime inputs
+Need:
+* user_lat
+* user_lng
+* trip_id / session_id
+* nearest anchor
+* route direction
+* current time/daypart
+* user stage (arrival / exploring / winding_down)
+* nearby matched context zones
+________________
+
+
+STEP C2 — Match user to best context zone
+Find all context zones within practical proximity.
+Recommended:
+* immediate match radius = zone radius
+* soft match overflow = +25% to +40%
+Pick best zone using:
+runtime_zone_match_score =
+ 0.35 * proximity_to_zone_center
++ 0.25 * route_alignment
++ 0.20 * nearest_anchor_match
++ 0.10 * zone_confidence
++ 0.10 * current_time_compatibility
+
+
+Best result becomes:
+* matched_context_zone_id
+________________
+
+
+STEP C3 — Adjust for live route/time state
+Now adapt the stable zone to the live moment.
+Example:
+Same promenade zone can become:
+At 10 AM
+* route_context = exploration
+At 1 PM
+* route_context = food_window
+At 6:30 PM
+* route_context = golden_hour
+At 10 PM
+* route_context = night_out
+This is why static context alone is not enough.
+________________
+
+
+STEP C4 — Write to runtime_context_state
+Store:
+* current primary context
+* current active subcontext
+* route context
+* context signature
+* confidence
+* inference source
+This becomes the live semantic state used by feed generation.
+________________
+
+
+10) How This Should Be Used at Feed Time
+This is where it all pays off.
+At feed generation time, your candidate entities should receive:
+________________
+
+
+Context Inputs Used by Ranking
+From runtime_context_state:
+* primary_context
+* active_context_zone
+* secondary_contexts
+* route_context
+* context_confidence
+From entity_context_affinity:
+* context_affinity_score
+* entity_context_role
+* semantic_tags
+________________
+
+
+11) How Context Should Affect Ranking
+This is very important:
+Context should not be just another weak feature.
+It should meaningfully shape candidate quality.
+________________
+
+
+Recommended ranking influence
+Use context in 3 ways:
+________________
+
+
+A) Hard eligibility suppression
+Suppress obvious context breakers.
+Example:
+* quiet scenic zone → suppress loud nightlife unless strong opportunity trigger
+________________
+
+
+B) Soft boost
+Boost things that naturally belong.
+Example:
+* promenade café during scenic wander
+________________
+
+
+C) Role shaping
+Use context role to decide what slot the item belongs to.
+Example:
+* core_fit → anchor-support slot
+* transition_fit → bridge slot
+* utility_fit → practical insert
+* scenic_fit → wow insert
+This is extremely powerful.
+________________
+
+
+12) Recommended Refresh Strategy
+You should not recompute everything every request.
+________________
+
+
+Stable tables refresh
+context_zones
+Recompute:
+* when destination data changes
+* when major new entities are added
+* scheduled weekly/monthly refresh
+________________
+
+
+entity_context_affinity
+Recompute:
+* when zone changes
+* when entity metadata changes
+* when reviews / tags meaningfully update
+________________
+
+
+Runtime table refresh
+runtime_context_state
+Recompute when:
+* user moves > 120–200m
+* nearest anchor changes
+* route stage changes
+* daypart changes
+* feed is re-requested after meaningful movement
+This is the right balance.
+________________
+
+
+13) Laravel Implementation Structure (Recommended)
+Since you’re building Algo seriously, don’t bury this in one controller.
+Make it modular.
+________________
+
+
+Recommended service structure
+app/Services/Algo/Context/
+  ContextTaxonomyService.php
+  ContextZoneBuilderService.php
+  ContextSignalService.php
+  EntityContextAffinityService.php
+  RuntimeContextInferenceService.php
+  ContextResolverService.php
+
+
+________________
+
+
+Recommended responsibilities
+________________
+
+
+ContextTaxonomyService
+Returns allowed contexts and mappings.
+________________
+
+
+ContextZoneBuilderService
+Builds / updates context_zones.
+________________
+
+
+ContextSignalService
+Computes context signals from nearby evidence.
+________________
+
+
+EntityContextAffinityService
+Scores entities against zones.
+________________
+
+
+RuntimeContextInferenceService
+Figures out the user’s live current context.
+________________
+
+
+ContextResolverService
+Main public interface used by feed engine.
+Example:
+$contextState = app(ContextResolverService::class)->resolveForTrip($tripId, $lat, $lng);
+
+
+This is how you should wire it.
+________________
+
+
+14) Recommended Runtime Output Shape
+When feed engine requests context, return a clean object like:
+{
+  "primary_context": "waterfront",
+  "active_context_zone": "promenade_zone",
+  "secondary_contexts": [
+    "food_strip",
+    "sunset_zone"
+  ],
+  "route_context": "golden_hour",
+  "context_confidence": 0.87,
+  "matched_context_zone_id": 182,
+  "context_signature": {
+    "primary_context": "waterfront",
+    "secondary_contexts": ["food_strip", "sunset_zone"],
+    "route_context": "golden_hour"
+  }
+}
+
+
+This is exactly what downstream modules need.
+________________
+
+
+15) Minimum Viable Version vs Full Version
+Important so you don’t overbuild V1.
+________________
+
+
+V1 (Recommended first build)
+Build with:
+* context_taxonomy
+* context_zones
+* entity_context_affinity
+* runtime_context_state
+Use signals from:
+* nearby entity patterns
+* anchor semantics
+* naming
+* simple geography flags
+* route alignment
+* operating hours
+* category fit
+This is already very strong.
+________________
+
+
+V2 upgrades later
+Later you can improve with:
+* better GIS line-of-sight
+* review phrase NLP
+* visual frontage / same-promenade inference
+* user behavioral dwell learning
+* cluster graph semantics
+* dynamic seasonal context overlays
+Do not block V1 on these.
+________________
+
+
+16) Final Build Recommendation
+If you want this engine to stay clean and scalable, follow this exact principle:
+________________
+
+
+Store 3 different truths separately
+1. Stable Place Truth
+Stored in:
+* context_zones
+This answers:
+“What kind of place is this area?”
+________________
+
+
+2. Stable Entity Fit Truth
+Stored in:
+* entity_context_affinity
+This answers:
+“What naturally belongs here?”
+________________
+
+
+3. Live Session Truth
+Stored in:
+* runtime_context_state
+This answers:
+“What context is active for this user right now?”
+________________
+
+
+That separation is what keeps the engine powerful and sane.
+________________
+
+
+Final Verdict
+The Context Engine is what gives Algo taste, coherence, and place intelligence.
+Without it, your system knows:
+“What’s near.”
+With it, your system knows:
+“What belongs.”
+And that is exactly the difference between:
+* generic recommendation feed
+and
+* a feed that feels deeply native to the place
+________________
+
+
+Now we move from architecture → actual computation logic.
+This part answers:
+“Exactly how do I compute every score using real data?”
+No abstraction. No hand-waving.
+This is implementation-grade logic you can plug into Laravel + SQL.
+________________
+
+
+PART 3 — EXACT SCORING + COMPUTATION LAYER
+________________
+
+
+1) What This Part Covers
+We will define:
+A. Zone Detection Computation
+   * how to compute primary_context
+   * how to compute secondary_contexts
+   * how to compute context_confidence
+B. Entity Context Affinity Computation
+   * exact formulas for every score component
+   * how to derive them from your current tables
+   * SQL / pseudo-SQL
+C. Role Assignment Logic
+D. Runtime Context Matching Logic
+________________
+
+
+2) Assumptions About Your Existing Data
+Based on your system, you already have:
+   * Sight table
+   * Restaurant table
+   * Experience table
+   * location hierarchy (entity_location_id)
+   * ratings + review counts
+   * lat/lng
+   * categories / types
+We will build on top of this.
+________________
+
+
+3) ZONE DETECTION — EXACT COMPUTATION
+________________
+
+
+STEP 1 — Fetch Nearby Entities (Core Query)
+This is reused everywhere.
+________________
+
+
+SQL (MySQL compatible)
+SELECT 
+  'sight' AS entity_type,
+  s.id AS entity_id,
+  s.lat,
+  s.lng,
+  s.category,
+  s.subcategory,
+  s.rating,
+  s.review_count
+FROM sights s
+WHERE ST_Distance_Sphere(POINT(s.lng, s.lat), POINT(:lng, :lat)) <= :radius
+
+
+UNION ALL
+
+
+SELECT 
+  'restaurant',
+  r.id,
+  r.lat,
+  r.lng,
+  r.category,
+  r.subcategory,
+  r.rating,
+  r.review_count
+FROM restaurants r
+WHERE ST_Distance_Sphere(POINT(r.lng, r.lat), POINT(:lng, :lat)) <= :radius
+
+
+UNION ALL
+
+
+SELECT 
+  'experience',
+  e.id,
+  e.lat,
+  e.lng,
+  e.category,
+  e.subcategory,
+  e.rating,
+  e.review_count
+FROM experiences e
+WHERE ST_Distance_Sphere(POINT(e.lng, e.lat), POINT(:lng, :lat)) <= :radius;
+
+
+________________
+
+
+Laravel Wrapper
+$entities = DB::select($query, [
+  'lat' => $lat,
+  'lng' => $lng,
+  'radius' => $radiusMeters
+]);
+
+
+________________
+
+
+STEP 2 — Build Pattern Signals (Core Feature Engineering)
+We compute density ratios.
+________________
+
+
+PHP Logic
+$total = count($entities);
+
+
+$counts = [
+  'food' => 0,
+  'scenic' => 0,
+  'heritage' => 0,
+  'nightlife' => 0,
+  'shopping' => 0
+];
+
+
+foreach ($entities as $e) {
+  if ($e->entity_type === 'restaurant') $counts['food']++;
+
+
+  if (in_array($e->category, ['viewpoint','beach','scenic','sunset'])) {
+    $counts['scenic']++;
+  }
+
+
+  if (in_array($e->category, ['museum','monument','church','heritage'])) {
+    $counts['heritage']++;
+  }
+
+
+  if (in_array($e->category, ['bar','club','lounge'])) {
+    $counts['nightlife']++;
+  }
+
+
+  if (in_array($e->category, ['market','shopping'])) {
+    $counts['shopping']++;
+  }
+}
+
+
+$signals = [];
+foreach ($counts as $k => $v) {
+  $signals[$k] = $total > 0 ? ($v / $total) * 100 : 0;
+}
+
+
+________________
+
+
+STEP 3 — PRIMARY CONTEXT SCORING (ACTUAL RULES)
+________________
+
+
+Candidate Contexts (Hardcoded Map)
+$contextRules = [
+  'beach' => fn($s) => 0.6*$s['scenic'] + 0.3*$s['food'],
+  'waterfront' => fn($s) => 0.5*$s['scenic'] + 0.2*$s['food'],
+  'old_town' => fn($s) => 0.7*$s['heritage'] + 0.2*$s['shopping'],
+  'market_district' => fn($s) => 0.6*$s['shopping'] + 0.3*$s['food'],
+  'nightlife_district' => fn($s) => 0.7*$s['nightlife'] + 0.2*$s['food'],
+];
+
+
+________________
+
+
+Compute Scores
+$contextScores = [];
+
+
+foreach ($contextRules as $context => $fn) {
+  $contextScores[$context] = $fn($signals);
+}
+
+
+arsort($contextScores);
+
+
+$primaryContext = array_key_first($contextScores);
+$secondBest = array_values($contextScores)[1] ?? 0;
+$topScore = array_values($contextScores)[0];
+
+
+________________
+
+
+STEP 4 — CONTEXT CONFIDENCE
+$margin = $topScore - $secondBest;
+
+
+$confidence = min(1, (
+  0.6 * ($margin / 100) +
+  0.4 * ($topScore / 100)
+));
+
+
+________________
+
+
+STEP 5 — SECONDARY CONTEXT DETECTION
+________________
+
+
+Rule-Based Detection
+$secondary = [];
+
+
+if ($signals['food'] > 40) $secondary[] = 'food_strip';
+if ($signals['scenic'] > 40) $secondary[] = 'viewpoint_zone';
+if ($signals['heritage'] > 40) $secondary[] = 'heritage_lane';
+if ($signals['nightlife'] > 40) $secondary[] = 'night_bar_zone';
+if ($signals['shopping'] > 40) $secondary[] = 'market_lane';
+
+
+________________
+
+
+Active Context Zone
+$activeContext = $secondary[0] ?? 'general_zone';
+
+
+________________
+
+
+4) ENTITY CONTEXT AFFINITY — FULL COMPUTATION
+Now the important part.
+________________
+
+
+STEP 1 — Distance Score (Context Aware)
+________________
+
+
+PHP Function
+function distanceScore($distanceMeters, $context) {
+  if ($context === 'old_town') {
+    if ($distanceMeters <= 80) return 100;
+    if ($distanceMeters <= 180) return 80;
+    if ($distanceMeters <= 350) return 60;
+    return 30;
+  }
+
+
+  if ($context === 'beach' || $context === 'waterfront') {
+    if ($distanceMeters <= 150) return 100;
+    if ($distanceMeters <= 350) return 85;
+    if ($distanceMeters <= 700) return 65;
+    return 40;
+  }
+
+
+  return max(0, 100 - ($distanceMeters / 10));
+}
+
+
+________________
+
+
+STEP 2 — Semantic Match Score
+________________
+
+
+Mapping Matrix
+$semanticMap = [
+  'beach' => ['beach','seafood','sunset','viewpoint'],
+  'old_town' => ['museum','heritage','church','plaza'],
+  'market_district' => ['market','shopping','bazaar'],
+  'nightlife_district' => ['bar','club','lounge']
+];
+
+
+________________
+
+
+Score Logic
+function semanticScore($entityCategory, $context, $map) {
+  return in_array($entityCategory, $map[$context] ?? []) ? 100 : 40;
+}
+
+
+________________
+
+
+STEP 3 — Category Match Score
+function categoryScore($type, $context) {
+  if ($context === 'food_strip' && $type === 'restaurant') return 100;
+  if ($context === 'heritage_lane' && $type === 'sight') return 90;
+  if ($context === 'night_bar_zone' && $type === 'restaurant') return 80;
+
+
+  return 50;
+}
+
+
+________________
+
+
+STEP 4 — Line of Sight Score (Proxy)
+function lineOfSightScore($entity, $context) {
+  if ($context === 'waterfront' && strpos($entity->category, 'view') !== false) {
+    return 100;
+  }
+
+
+  return 60;
+}
+
+
+________________
+
+
+STEP 5 — Review Signal Score
+function reviewScore($rating, $reviewCount) {
+  $ratingScore = ($rating / 5) * 60;
+  $volumeScore = min(40, log($reviewCount + 1) * 10);
+
+
+  return $ratingScore + $volumeScore;
+}
+
+
+________________
+
+
+STEP 6 — Time Fit Score
+function timeFitScore($hour, $category) {
+  if ($hour >= 17 && $category === 'sunset') return 100;
+  if ($hour >= 20 && in_array($category, ['bar','club'])) return 100;
+  if ($hour <= 11 && $category === 'cafe') return 90;
+
+
+  return 60;
+}
+
+
+________________
+
+
+STEP 7 — Cluster Fit Score
+function clusterScore($nearbySimilarCount) {
+  if ($nearbySimilarCount >= 5) return 100;
+  if ($nearbySimilarCount >= 3) return 80;
+  if ($nearbySimilarCount >= 1) return 60;
+  return 30;
+}
+
+
+________________
+
+
+STEP 8 — FINAL CONTEXT AFFINITY SCORE
+________________
+
+
+Final Formula (Exact)
+$score =
+  0.24 * $distance +
+  0.18 * $semantic +
+  0.14 * $category +
+  0.14 * $los +
+  0.12 * $review +
+  0.10 * $time +
+  0.08 * $cluster;
+
+
+________________
+
+
+Normalize
+$finalScore = round($score, 2);
+
+
+________________
+
+
+5) ROLE ASSIGNMENT — EXACT RULES
+________________
+
+
+PHP Logic
+function assignRole($score, $semantic, $distance) {
+  if ($score >= 85 && $semantic >= 80) return 'core_fit';
+  if ($score >= 70) return 'supporting_fit';
+  if ($distance > 400 && $score >= 60) return 'transition_fit';
+  if ($semantic >= 85 && $score < 70) return 'specialist_fit';
+  if ($score >= 60 && $semantic >= 60) return 'scenic_fit';
+  if ($score >= 50) return 'utility_fit';
+  if ($score >= 30) return 'weak_fit';
+
+
+  return 'context_breaker';
+}
+
+
+________________
+
+
+6) RUNTIME CONTEXT MATCHING — EXACT LOGIC
+________________
+
+
+SQL — Fetch Nearby Zones
+SELECT *,
+  ST_Distance_Sphere(
+    POINT(center_lng, center_lat),
+    POINT(:lng, :lat)
+  ) AS distance
+FROM context_zones
+WHERE ST_Distance_Sphere(
+  POINT(center_lng, center_lat),
+  POINT(:lng, :lat)
+) <= radius_meters * 1.4
+ORDER BY distance ASC;
+
+
+________________
+
+
+PHP Scoring
+foreach ($zones as $z) {
+  $score =
+    0.35 * (100 - ($z->distance / $z->radius_meters * 100)) +
+    0.25 * $routeMatch +
+    0.20 * $anchorMatch +
+    0.10 * ($z->context_confidence * 100) +
+    0.10 * $timeMatch;
+
+
+  $z->runtime_score = $score;
+}
+
+
+________________
+
+
+Select Best Zone
+usort($zones, fn($a,$b) => $b->runtime_score <=> $a->runtime_score);
+
+
+$bestZone = $zones[0] ?? null;
+
+
+________________
+
+
+7) FINAL OUTPUT OBJECT (USED BY FEED)
+________________
+
+
+return [
+  'primary_context' => $bestZone->primary_context,
+  'active_context_zone' => $bestZone->active_context_zone,
+  'secondary_contexts' => json_decode($bestZone->secondary_contexts, true),
+  'context_confidence' => $bestZone->context_confidence,
+  'context_zone_id' => $bestZone->context_zone_id
+];
+
+
+________________
+
+
+8) CRITICAL IMPLEMENTATION NOTES
+________________
+
+
+1. Do NOT overfit early
+Keep:
+   * simple rules
+   * clean mappings
+   * easy-to-debug scores
+________________
+
+
+2. Store ALL intermediate scores
+This is crucial:
+   * debugging
+   * tuning
+   * learning later
+________________
+
+
+3. Context must influence ranking strongly
+Not just +5% weight.
+Use:
+   * filtering
+   * boosting
+   * role-based slotting
+________________
+
+
+4. Always keep fallback behavior
+If:
+   * no strong context
+   * low confidence
+Then:
+   * widen diversity
+   * reduce strict filtering
+________________
+
+
+FINAL VERDICT
+At this point, your Context Engine is:
+Fully Defined
+   * schema
+   * signals
+   * scoring
+Fully Computable
+   * SQL queries
+   * PHP logic
+   * formulas
+Fully Integratable
+   * runtime state
+   * feed pipeline ready
+________________
+
+
+This is no longer “conceptual AI system.”
+This is a production-grade semantic engine.

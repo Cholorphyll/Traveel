@@ -1,0 +1,1523 @@
+﻿MODULE — CARD COMPOSITION ENGINE (FULL SPEC)
+________________
+
+
+1. PURPOSE
+Convert ranked output (entities / candidates) into UI-ready card structures
+This module answers:
+“What exact card should the user see next, and what should be inside it?”
+
+
+________________
+
+
+2. INPUT CONTRACT (from Slot Ranking + Sequence Planner)
+{
+  "intent": "ANCHOR_EXPLORATION",
+  "format_hint": "ENTITY_WITH_CONTEXT",
+
+
+  "selected_unit": {
+    "type": "ENTITY", 
+    "entity_id": 123
+  },
+
+
+  "candidate_pool": [
+    { "entity_id": 123, "score": 0.92 },
+    { "entity_id": 456, "score": 0.88 }
+  ],
+
+
+  "context": {
+    "location_id": 987,
+    "time_of_day": "LUNCH",
+    "user_energy": "MEDIUM",
+    "visited_entities": [111, 222],
+    "current_anchor": 123
+  }
+}
+
+
+________________
+
+
+3. OUTPUT CONTRACT (to Moment Framing + Feed Assembly)
+{
+  "card_id": "card_001",
+
+
+  "card_type": "ENTITY_WITH_CONTEXT",
+
+
+  "layout": "LARGE_WITH_HORIZONTAL_SCROLL",
+
+
+  "primary": {
+    "entity_id": 123,
+    "entity_type": "ATTRACTION"
+  },
+
+
+  "sections": [
+    {
+      "section_type": "CONTEXT_STRIP",
+      "label": "Nearby Eats",
+      "items": [201, 202, 203, 204]
+    }
+  ],
+
+
+  "meta": {
+    "reason": "HIGH_ANCHOR + LUNCH_CONTEXT",
+    "confidence": 0.91
+  }
+}
+
+
+________________
+
+
+4. CARD TYPES (STRICT ENUM)
+PRIMARY_ENTITY
+ENTITY_WITH_CONTEXT
+COLLECTION
+HYBRID
+
+
+________________
+
+
+5. LAYOUT TYPES (UI MAPPING)
+LARGE
+MEDIUM
+CAROUSEL
+LARGE_WITH_HORIZONTAL_SCROLL
+MEDIUM_WITH_HORIZONTAL_SCROLL
+MULTI_SECTION
+
+
+________________
+
+
+6. CORE DECISION FLOW
+________________
+
+
+STEP 1 — Resolve Final Format
+IF format_hint exists:
+    use it
+
+
+ELSE:
+    derive using rules:
+        IF high importance entity → PRIMARY_ENTITY
+        IF strong context opportunity → ENTITY_WITH_CONTEXT
+        IF browsing state → COLLECTION
+        IF mixed signals → HYBRID
+
+
+________________
+
+
+STEP 2 — Branch by Format
+________________
+
+
+🟢 CASE A — PRIMARY_ENTITY
+Input:
+* single entity
+Logic:
+IF entity_tier = 1:
+    layout = LARGE
+ELSE:
+    layout = MEDIUM
+
+
+________________
+
+
+Output:
+{
+  "card_type": "PRIMARY_ENTITY",
+  "layout": "LARGE",
+  "primary": {...}
+}
+
+
+________________
+________________
+
+
+🟡 CASE B — ENTITY_WITH_CONTEXT (MOST IMPORTANT)
+This is your core experience builder
+________________
+
+
+Step B1 — Select Primary
+primary = selected_unit.entity
+
+
+________________
+
+
+Step B2 — Generate Context Strips
+Call:
+ContextStripBuilder(primary, context)
+
+
+________________
+
+
+Context Types:
+NEARBY_RESTAURANTS
+NEARBY_ATTRACTIONS
+EXPERIENCES
+QUICK_STOPS
+
+
+________________
+
+
+Selection logic:
+IF time_of_day = LUNCH:
+    add NEARBY_RESTAURANTS
+
+
+IF anchor_dwell_time HIGH:
+    add EXPERIENCES
+
+
+IF density HIGH:
+    add NEARBY_ATTRACTIONS
+
+
+________________
+
+
+Step B3 — Limit sections
+max_sections = 2
+max_items_per_section = 5
+
+
+________________
+
+
+Output:
+{
+  "card_type": "ENTITY_WITH_CONTEXT",
+  "layout": "LARGE_WITH_HORIZONTAL_SCROLL",
+  "primary": {...},
+  "sections": [...]
+}
+
+
+________________
+________________
+
+
+🔵 CASE C — COLLECTION (Carousel Cards)
+________________
+
+
+Step C1 — Determine Collection Type
+From intent/context:
+TRENDING
+RIGHT_NOW
+NEARBY_BEST
+HIDDEN_GEMS
+FOOD_CLUSTER
+
+
+________________
+
+
+Step C2 — Build Collection
+Call:
+CollectionBuilder(type, context)
+
+
+________________
+
+
+Collection Rules:
+min_items = 5
+max_items = 12
+
+
+all items:
+    must be unvisited
+    must pass eligibility
+
+
+________________
+
+
+Output:
+{
+  "card_type": "COLLECTION",
+  "layout": "CAROUSEL",
+  "collection_type": "TRENDING",
+  "items": [...]
+}
+
+
+________________
+________________
+
+
+🟣 CASE D — HYBRID (Advanced)
+________________
+
+
+Structure:
+Primary entity
++ multiple sections
+
+
+________________
+
+
+Example:
+{
+  "card_type": "HYBRID",
+  "layout": "MULTI_SECTION",
+
+
+  "primary": {...},
+
+
+  "sections": [
+    { "type": "NEARBY", "items": [...] },
+    { "type": "SIMILAR", "items": [...] }
+  ]
+}
+
+
+________________
+
+
+7. SUB-MODULES REQUIRED
+________________
+
+
+7.1 ContextStripBuilder
+Input:
+primary_entity + context
+
+
+Output:
+list of sections
+
+
+________________
+
+
+Internal logic:
+distance filter < X km
+rating threshold
+time compatibility
+diversity scoring
+
+
+________________
+________________
+
+
+7.2 CollectionBuilder
+Input:
+collection_type + context
+
+
+________________
+
+
+Logic per type:
+________________
+
+
+TRENDING
+score =
+    popularity spike
+    recent reviews
+    click velocity
+
+
+________________
+
+
+RIGHT_NOW
+score =
+    open_now
+    time relevance
+    proximity
+
+
+________________
+
+
+FOOD_CLUSTER
+cluster by cuisine + proximity
+
+
+________________
+________________
+
+
+7.3 LayoutResolver
+Maps:
+card_type + entity_tier → layout
+
+
+________________
+
+
+8. HARD RULES (VERY IMPORTANT)
+________________
+
+
+RULE 1 — No duplication
+entity must not appear:
+    in primary AND in sections
+    in previous 3 cards
+
+
+________________
+________________
+
+
+RULE 2 — Context must be relevant
+distance < threshold
+time match required
+
+
+________________
+________________
+
+
+RULE 3 — Limit cognitive load
+max sections = 2
+max items per strip = 5
+
+
+________________
+________________
+
+
+RULE 4 — Collection integrity
+all items must belong to same intent
+
+
+________________
+________________
+
+
+RULE 5 — Route sanity
+IF ENTITY_WITH_CONTEXT:
+    context items must not create major detours
+
+
+________________
+
+
+9. MEMORY INTERACTION
+________________
+
+
+Input:
+recent_cards
+recent_entities
+
+
+________________
+
+
+Usage:
+avoid repetition
+avoid showing same collection twice
+
+
+________________
+________________
+
+
+10. PERFORMANCE CONSTRAINTS
+________________
+
+
+max composition time: < 50ms
+
+
+precompute:
+    nearby clusters
+    trending sets
+
+
+________________
+________________
+
+
+11. EXAMPLE (REAL FLOW)
+________________
+
+
+Input:
+{
+  "intent": "ANCHOR_EXPLORATION",
+  "format_hint": "ENTITY_WITH_CONTEXT",
+  "selected_unit": { "entity_id": 101 },
+  "time_of_day": "LUNCH"
+}
+
+
+________________
+
+
+Output:
+{
+  "card_type": "ENTITY_WITH_CONTEXT",
+  "layout": "LARGE_WITH_HORIZONTAL_SCROLL",
+
+
+  "primary": { "entity_id": 101 },
+
+
+  "sections": [
+    {
+      "type": "NEARBY_RESTAURANTS",
+      "items": [201, 202, 203, 204]
+    }
+  ]
+}
+
+
+________________
+
+
+12. KEY INSIGHT
+This module is NOT just formatting.
+It is:
+Experience Packaging Engine
+
+
+________________
+
+
+Without it:
+* your feed = list
+With it:
+* your feed = guided journey
+________________
+
+
+
+
+Perfect — this is the engine that makes your cards feel intelligent, not just formatted. If Card Composition is the “packager,” then ContextStripBuilder is the relevance brain inside each card.
+I’ll give you a full production-grade spec — including DB schema, scoring, filtering, and runtime flow.
+________________
+
+
+SUB-MODULE — ContextStripBuilder (FULL SPEC)
+________________
+
+
+1. 🎯 PURPOSE
+Generate highly relevant horizontal strips inside a card based on a primary entity + current context
+This answers:
+“What else can I do right here, right now, that makes sense?”
+
+
+________________
+
+
+2. 📥 INPUT CONTRACT
+{
+  "primary_entity": {
+    "entity_id": 123,
+    "entity_type": "ATTRACTION",
+    "lat": 51.5194,
+    "lng": -0.1270,
+    "avg_duration_mins": 120,
+    "tier": 1
+  },
+
+
+  "context": {
+    "time_of_day": "LUNCH",
+    "current_time": "13:10",
+    "user_energy": "MEDIUM",
+    "travel_mode": "WALK",
+    "visited_entities": [101, 102],
+    "recent_entities": [110, 111],
+    "location_id": 987
+  },
+
+
+  "constraints": {
+    "max_sections": 2,
+    "max_items_per_section": 5
+  }
+}
+
+
+________________
+
+
+3. 📤 OUTPUT CONTRACT
+{
+  "sections": [
+    {
+      "section_type": "NEARBY_RESTAURANTS",
+      "label": "Great lunch spots nearby",
+      "items": [
+        {
+          "entity_id": 201,
+          "score": 0.91,
+          "distance_m": 320,
+          "reason": "HIGH_RATING + CLOSE + LUNCH_MATCH"
+        }
+      ]
+    }
+  ]
+}
+
+
+________________
+
+
+4. 🧩 SUPPORTED CONTEXT TYPES
+NEARBY_RESTAURANTS
+NEARBY_ATTRACTIONS
+EXPERIENCES
+QUICK_STOPS
+CAFES
+EVENING_SPOTS
+
+
+________________
+
+
+5. 🗄️ DATABASE DESIGN
+________________
+
+
+5.1 Core Entity Table (existing)
+entities
+---------
+id
+type (ATTRACTION, RESTAURANT, EXPERIENCE)
+lat
+lng
+rating
+review_count
+avg_duration_mins
+price_level
+tags (json)
+
+
+________________
+
+
+5.2 Precomputed Nearby Graph (CRITICAL)
+entity_nearby_index
+--------------------
+source_entity_id
+target_entity_id
+distance_m
+travel_time_mins
+walk_score
+relevance_score
+
+
+👉 Precompute using:
+* Haversine distance
+* Google Maps / OSRM (optional for travel time)
+________________
+
+
+5.3 Entity Context Tags
+entity_context_tags
+--------------------
+entity_id
+tag_type   -- TIME, MOOD, FOOD_TYPE, EXPERIENCE_TYPE
+tag_value  -- LUNCH, EVENING, QUICK, FAMILY, etc
+weight
+
+
+________________
+
+
+5.4 Popularity Signals
+entity_popularity
+--------------------
+entity_id
+global_popularity_score
+recent_trend_score
+hourly_visit_density
+
+
+________________
+
+
+6. ⚙️ CONTEXT STRIP GENERATION FLOW
+________________
+
+
+STEP 1 — Determine Eligible Context Types
+IF time_of_day = LUNCH:
+    include NEARBY_RESTAURANTS
+
+
+IF user_energy = LOW:
+    include QUICK_STOPS or CAFES
+
+
+IF primary avg_duration high:
+    include EXPERIENCES
+
+
+IF density high:
+    include NEARBY_ATTRACTIONS
+
+
+________________
+
+
+STEP 2 — Fetch Candidate Pool
+SELECT *
+FROM entity_nearby_index eni
+JOIN entities e ON eni.target_entity_id = e.id
+WHERE eni.source_entity_id = :primary_id
+AND eni.distance_m < :distance_threshold
+LIMIT 100;
+
+
+________________
+
+
+Distance Threshold Logic
+WALK → 800m
+BIKE → 2km
+CAR → 5km
+
+
+________________
+
+
+STEP 3 — Filter Candidates
+Apply hard filters:
+1. Remove visited_entities
+2. Remove recently shown entities
+3. Remove closed places (if time-aware)
+4. Remove irrelevant types
+
+
+________________
+
+
+STEP 4 — Score Each Candidate
+________________
+
+
+🧠 FINAL SCORING FORMULA
+final_score =
+    (0.30 * proximity_score)
+  + (0.20 * rating_score)
+  + (0.15 * popularity_score)
+  + (0.15 * context_match_score)
+  + (0.10 * diversity_score)
+  + (0.10 * route_score)
+
+
+________________
+
+
+6.4.1 Proximity Score
+proximity_score = 1 - (distance / max_distance)
+
+
+________________
+
+
+6.4.2 Rating Score
+rating_score = (rating / 5) * log(review_count + 1)
+
+
+________________
+
+
+6.4.3 Popularity Score
+popularity_score =
+    global_popularity * 0.6 +
+    recent_trend * 0.4
+
+
+________________
+
+
+6.4.4 Context Match Score
+Based on tags:
+IF time_of_day = LUNCH AND tag = LUNCH:
+    +1
+
+
+IF user_energy = LOW AND tag = QUICK:
+    +1
+
+
+Normalize to 0–1
+________________
+
+
+6.4.5 Diversity Score
+penalty if:
+    same cuisine repeated
+    same category repeated
+
+
+________________
+
+
+6.4.6 Route Score
+penalize:
+    detours > 20% from direction of next anchor
+
+
+________________
+
+
+7. 🧠 SECTION BUILDING LOGIC
+________________
+
+
+Group candidates by type:
+RESTAURANT → NEARBY_RESTAURANTS
+ATTRACTION → NEARBY_ATTRACTIONS
+EXPERIENCE → EXPERIENCES
+
+
+________________
+
+
+Select top items:
+sort by final_score DESC
+take top N (max_items_per_section)
+
+
+________________
+________________
+
+
+8. 🎯 SECTION PRIORITIZATION
+If multiple sections possible:
+priority order:
+
+
+1. TIME-CRITICAL (food at lunch)
+2. HIGH RELEVANCE (close + high score)
+3. EXPERIENCE ENHANCEMENT
+
+
+________________
+
+
+Then:
+limit to max_sections (usually 1–2)
+
+
+________________
+
+
+9. 🧠 LABEL GENERATION
+Dynamic labels:
+NEARBY_RESTAURANTS →
+    "Great lunch spots nearby"
+
+
+CAFES →
+    "Coffee breaks around here"
+
+
+EXPERIENCES →
+    "Things to do here"
+
+
+QUICK_STOPS →
+    "Quick stops you can add"
+
+
+________________
+
+
+10. ⚠️ HARD RULES
+________________
+
+
+Rule 1 — No duplication
+No entity:
+    in same card twice
+    in last 3 cards
+
+
+________________
+
+
+Rule 2 — Distance sanity
+Reject if:
+distance > threshold
+
+
+________________
+
+
+Rule 3 — Context integrity
+Do NOT show:
+dinner places at 10 AM
+bars in morning
+
+
+________________
+
+
+Rule 4 — Cognitive load
+max_sections = 2
+max_items = 5
+
+
+________________
+
+
+11. ⚡ PERFORMANCE STRATEGY
+________________
+
+
+Precompute:
+* entity_nearby_index
+* trending scores
+* tag weights
+________________
+
+
+Cache:
+key = primary_entity + time_bucket + user_energy
+TTL = 15–30 mins
+
+
+________________
+________________
+
+
+12. 🧪 EXAMPLE (REAL OUTPUT)
+________________
+
+
+Input:
+* Primary: British Museum
+* Time: 1:15 PM
+* Mode: WALK
+________________
+
+
+Output:
+{
+  "sections": [
+    {
+      "section_type": "NEARBY_RESTAURANTS",
+      "label": "Great lunch spots nearby",
+      "items": [
+        { "entity_id": 501, "distance_m": 250 },
+        { "entity_id": 502, "distance_m": 320 },
+        { "entity_id": 503, "distance_m": 410 }
+      ]
+    }
+  ]
+}
+
+
+________________
+
+
+🔥 KEY INSIGHT
+This sub module must feel:
+“Obvious to the user, but non-trivial to compute”
+
+
+If users think:
+“Yeah, of course I’d do this next”
+👉 You’ve done it right.
+________________
+
+
+Great — this is the second half of the “experience packaging” system.
+If ContextStripBuilder answers “what can I do right here?”, then CollectionBuilder answers:
+“What’s worth exploring as a set right now?”
+
+
+This is what powers:
+* carousels (Trending, Right Now, Food clusters)
+* non-linear browsing moments
+* energy resets in the feed
+________________
+
+
+SUB-MODULE — CollectionBuilder (FULL SPEC)
+________________
+
+
+1. 🎯 PURPOSE
+Build coherent, high-quality collections (carousels) based on:
+* user context
+* location
+* time
+* system signals (trend, density, intent)
+________________
+
+
+2. 📥 INPUT CONTRACT
+{
+  "collection_type": "RIGHT_NOW",
+
+
+  "context": {
+    "location_id": 987,
+    "lat": 51.5194,
+    "lng": -0.1270,
+
+
+    "time_of_day": "LUNCH",
+    "current_time": "13:15",
+
+
+    "user_energy": "MEDIUM",
+    "travel_mode": "WALK",
+
+
+    "visited_entities": [101, 102],
+    "recent_entities": [110, 111],
+
+
+    "current_anchor": 123
+  },
+
+
+  "constraints": {
+    "min_items": 5,
+    "max_items": 12
+  }
+}
+
+
+________________
+
+
+3. 📤 OUTPUT CONTRACT
+{
+  "collection_type": "RIGHT_NOW",
+  "layout": "CAROUSEL",
+
+
+  "title": "Great lunch spots right now",
+
+
+  "items": [
+    {
+      "entity_id": 201,
+      "score": 0.93,
+      "distance_m": 320,
+      "reason": "OPEN_NOW + LUNCH_MATCH + CLOSE"
+    }
+  ],
+
+
+  "meta": {
+    "cohesion_score": 0.88,
+    "confidence": 0.91
+  }
+}
+
+
+________________
+
+
+4. 🧩 SUPPORTED COLLECTION TYPES
+You should fix this list (don’t make it dynamic initially):
+TRENDING
+RIGHT_NOW
+NEARBY_BEST
+HIDDEN_GEMS
+FOOD_CLUSTER
+QUICK_EXPLORATIONS
+EVENING_SPOTS
+
+
+________________
+
+
+5. 🗄️ DATABASE DESIGN
+________________
+
+
+5.1 Core Entities (reuse)
+entities
+---------
+id
+type
+lat
+lng
+rating
+review_count
+price_level
+tags (json)
+
+
+________________
+
+
+5.2 Popularity + Trend Signals
+entity_popularity
+------------------
+entity_id
+global_popularity_score
+recent_trend_score
+hourly_activity_score
+
+
+________________
+
+
+5.3 Location Buckets (CRITICAL)
+location_entity_index
+----------------------
+location_id
+entity_id
+distance_from_center
+cluster_id
+
+
+👉 Precompute:
+* city → area clusters
+* dense tourist zones
+________________
+
+
+5.4 Entity Clusters (for cohesion)
+entity_clusters
+----------------
+cluster_id
+cluster_type  -- FOOD, NIGHTLIFE, CULTURE
+entity_id
+weight
+
+
+________________
+
+
+5.5 Time Compatibility
+entity_time_profile
+--------------------
+entity_id
+open_time
+close_time
+peak_hours_json
+time_tags (LUNCH, DINNER, EVENING)
+
+
+________________
+
+
+6. ⚙️ COLLECTION BUILDING FLOW
+________________
+
+
+STEP 1 — Resolve Collection Intent
+From:
+* Sequence Planner intent
+* Opportunity Engine signals
+________________
+
+
+Example:
+IF time_of_day = LUNCH:
+    RIGHT_NOW or FOOD_CLUSTER
+
+
+IF high trend signal:
+    TRENDING
+
+
+IF exploration gap:
+    NEARBY_BEST
+
+
+________________
+
+
+STEP 2 — Fetch Candidate Pool
+________________
+
+
+Query:
+SELECT e.*
+FROM location_entity_index lei
+JOIN entities e ON lei.entity_id = e.id
+WHERE lei.location_id = :location_id
+LIMIT 300;
+
+
+________________
+
+
+Apply radius constraint:
+WALK → 1 km
+BIKE → 3 km
+CAR → 8 km
+
+
+________________
+
+
+STEP 3 — Filter Candidates
+________________
+
+
+REMOVE:
+- visited_entities
+- recently shown entities
+- closed entities (if RIGHT_NOW)
+- irrelevant types
+
+
+________________
+
+
+STEP 4 — Score Candidates
+________________
+
+
+🧠 BASE SCORING FORMULA
+base_score =
+    (0.25 * popularity_score)
+  + (0.20 * rating_score)
+  + (0.20 * proximity_score)
+  + (0.15 * context_match_score)
+  + (0.10 * diversity_score)
+  + (0.10 * novelty_score)
+
+
+________________
+
+
+6.4.1 Popularity Score
+popularity =
+    global_popularity * 0.5 +
+    recent_trend * 0.5
+
+
+________________
+
+
+6.4.2 Rating Score
+rating_score =
+    (rating / 5) * log(review_count + 1)
+
+
+________________
+
+
+6.4.3 Proximity Score
+proximity = 1 - (distance / max_radius)
+
+
+________________
+
+
+6.4.4 Context Match
+IF LUNCH:
+    restaurants + food tags boosted
+
+
+IF EVENING:
+    nightlife boosted
+
+
+________________
+
+
+6.4.5 Diversity Score
+Penalty if:
+* same cuisine repeats
+* same subcategory repeats
+________________
+
+
+6.4.6 Novelty Score
+Boost:
+not recently seen
+not globally obvious
+
+
+________________
+
+
+STEP 5 — COLLECTION-SPECIFIC LOGIC
+________________
+
+
+🟢 TRENDING
+score boost:
+    recent_trend_score
+    click velocity
+
+
+Constraint:
+must have trend_score > threshold
+
+
+________________
+
+
+🟡 RIGHT_NOW
+must:
+    open_now = true
+
+
+boost:
+    time relevance
+    proximity
+
+
+________________
+
+
+🔵 NEARBY_BEST
+focus:
+    highest rated + popular
+
+
+________________
+
+
+🟣 HIDDEN_GEMS
+filter:
+    review_count < threshold
+
+
+boost:
+    rating
+    uniqueness
+
+
+________________
+
+
+🟠 FOOD_CLUSTER
+________________
+
+
+Cluster selection:
+SELECT cluster_id
+FROM entity_clusters
+WHERE cluster_type = 'FOOD'
+ORDER BY density DESC
+LIMIT 1;
+
+
+________________
+
+
+Then fetch:
+SELECT entity_id
+FROM entity_clusters
+WHERE cluster_id = :selected_cluster;
+
+
+________________
+
+
+👉 Ensures:
+* same cuisine OR same area OR same vibe
+________________
+
+
+🔴 QUICK_EXPLORATIONS
+duration < 30 mins
+high proximity
+
+
+________________
+
+
+STEP 6 — COHESION CHECK (VERY IMPORTANT)
+________________
+
+
+Compute cohesion score:
+cohesion =
+    avg similarity (category + cluster + distance)
+
+
+________________
+
+
+Reject collection if:
+cohesion < 0.6
+
+
+________________
+
+
+👉 Prevents:
+random mixed carousels
+________________
+
+
+STEP 7 — SELECT FINAL ITEMS
+________________
+
+
+sort by final_score DESC
+
+
+take:
+    max_items (5–12)
+
+
+________________
+________________
+
+
+STEP 8 — GENERATE TITLE
+________________
+
+
+Dynamic titles:
+RIGHT_NOW →
+    "Great lunch spots right now"
+
+
+TRENDING →
+    "Trending around you"
+
+
+FOOD_CLUSTER →
+    "Best food spots in this area"
+
+
+HIDDEN_GEMS →
+    "Hidden gems worth discovering"
+
+
+________________
+________________
+
+
+7. ⚠️ HARD RULES
+________________
+
+
+Rule 1 — Cohesion > variety
+Better 6 similar items than 10 random ones
+
+
+________________
+
+
+Rule 2 — No repetition
+No entity in:
+    last 5 cards
+
+
+________________
+
+
+Rule 3 — Time correctness
+RIGHT_NOW must:
+    be open now
+
+
+________________
+
+
+Rule 4 — Density requirement
+min_items = 5
+
+
+Else:
+👉 fallback to ENTITY_WITH_CONTEXT
+________________
+________________
+
+
+8. ⚡ PERFORMANCE STRATEGY
+________________
+
+
+Precompute:
+* clusters
+* trending sets
+* time compatibility
+________________
+
+
+Cache:
+key = location_id + time_bucket + collection_type
+TTL = 10–20 mins
+
+
+________________
+________________
+
+
+9. 🧪 EXAMPLE
+________________
+
+
+Input:
+{
+  "collection_type": "RIGHT_NOW",
+  "time_of_day": "LUNCH",
+  "location": "Central London"
+}
+
+
+________________
+
+
+Output:
+{
+  "collection_type": "RIGHT_NOW",
+  "title": "Great lunch spots right now",
+
+
+  "items": [
+    { "entity_id": 501, "distance_m": 200 },
+    { "entity_id": 502, "distance_m": 350 },
+    { "entity_id": 503, "distance_m": 420 }
+  ]
+}
+
+
+________________
+
+
+🔥 KEY INSIGHT
+Collections are NOT:
+“lists of good places”
+
+
+They are:
+“situational bundles that feel obvious together”
+
+
+________________
+
+
+🧠 Final Mental Model
+________________
+
+
+ContextStripBuilder
+👉 micro relevance (inside a place)
+CollectionBuilder
+👉 macro relevance (exploration state)
+________________

@@ -19,6 +19,8 @@ class AlgoPopulateOpportunityCommand extends Command
 
     public function handle(): int
     {
+        ini_set('memory_limit', '512M');
+
         $locationId = $this->option('location') ? (int)$this->option('location') : null;
 
         $this->info('Populating opportunity profiles...');

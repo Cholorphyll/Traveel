@@ -1,0 +1,1449 @@
+﻿MODULE — ROUTE ENGINE (FINAL)
+7.0 PURPOSE
+The Route Engine determines whether a candidate next item:
+* fits the traveler’s current physical trajectory
+* preserves a believable journey shape
+* avoids stupid movement patterns
+* and only introduces detours when they are truly worth it
+It answers:
+“Does this next step make sense as part of a real tourist day?”
+This is not just routing.
+This is narrative movement logic grounded in geography.
+________________
+
+
+7.1 WHAT ROUTE ENGINE SHOULD MODEL
+The engine should evaluate candidate items across three layers:
+A. Route Continuity
+Does this item preserve directional and spatial flow?
+Avoid:
+* zig-zagging
+* backtracking
+* repeated crossing of the same area
+* random teleporting between disconnected areas
+________________
+
+
+B. Movement Cost
+How physically expensive is it to reach this item right now?
+Include:
+* distance
+* travel time
+* walkability / friction
+* elevation burden
+* mode complexity
+* traffic / transfer / access barriers
+________________
+
+
+C. Route Pattern
+What kind of journey shape is currently emerging?
+Examples:
+* LINEAR → moving progressively through city
+* CLUSTER → exploring dense nearby area
+* ANCHOR_JUMP → big deliberate move to another major anchor
+* EXCURSION → leaving main route temporarily, then returning
+* HUB_AND_SPOKE → operating around hotel / center / station
+* LOOP → circular sightseeing day
+This matters because:
+* some next items are good in a cluster day
+* others only make sense in an anchor jump
+* some are wrong unless you are in an excursion mode
+________________
+
+
+7.2 CORE PRINCIPLE
+The Route Engine should guide by default, but it should not become tyrannical.
+Default rule:
+Prefer route-coherent items.
+Override rule:
+Allow route-breaking items if they are strongly justified by:
+* anchor strength
+* opportunity strength
+* collective destination value
+* trip-critical importance
+That means Route Engine is a soft constraint with strong penalties, not an absolute blocker.
+________________
+
+
+7.3 REQUIRED INPUTS
+To compute route logic well, you need four input layers.
+________________
+
+
+7.4 INPUT LAYER A — ENTITY GEOMETRY
+This is your basic spatial layer.
+Required fields per entity
+Table: entity_geo_profile
+CREATE TABLE entity_geo_profile (
+    entity_id BIGINT PRIMARY KEY,
+    lat DECIMAL(10,7),
+    lng DECIMAL(10,7),
+
+
+    geo_hash_6 VARCHAR(12),
+    geo_hash_7 VARCHAR(12),
+    geo_hash_8 VARCHAR(12),
+
+
+    local_cluster_id BIGINT NULL,
+    district_cluster_id BIGINT NULL,
+    movement_zone_id BIGINT NULL,
+
+
+    elevation_m INT NULL,
+    walkability_score DECIMAL(5,2) NULL,
+    barrier_score DECIMAL(5,2) NULL,
+
+
+    nearest_transit_distance_m INT NULL,
+    nearest_parking_distance_m INT NULL,
+    pedestrian_access_score DECIMAL(5,2) NULL,
+
+
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL
+);
+
+
+________________
+
+
+Explanation of each field
+lat, lng
+The physical coordinates of the entity.
+geo_hash_6 / 7 / 8
+Used for:
+* fast proximity joins
+* local area grouping
+* route clustering
+Use:
+* geohash 6 ≈ broad district
+* geohash 7 ≈ neighborhood
+* geohash 8 ≈ micro-area
+These are extremely useful for:
+* “same area?”
+* “same walkable zone?”
+* “sudden jump?”
+________________
+
+
+local_cluster_id
+Represents a very local walkable cluster.
+Example:
+* “Louvre + Tuileries + Place Vendôme”
+* “Colosseum + Roman Forum + Capitoline area”
+Use DBSCAN / HDBSCAN or geohash grouping.
+________________
+
+
+district_cluster_id
+Larger area grouping.
+Example:
+* “Central Paris”
+* “Westminster”
+* “South Bank”
+This helps detect:
+* local move vs district jump
+________________
+
+
+movement_zone_id
+A route-relevant urban zone.
+This is broader than attraction clusters and should reflect how tourists naturally move.
+Example:
+* Historic core
+* museum corridor
+* riverfront strip
+* beach belt
+* nightlife district
+This is often more useful than admin boundaries.
+________________
+
+
+elevation_m
+Useful for hill burden.
+Can come from:
+* Google Elevation API
+* Mapbox terrain
+* OpenStreetMap elevation layers
+* SRTM/DEM datasets
+________________
+
+
+walkability_score
+How easy and pleasant it is to walk in this micro-area.
+Scale: 0–100
+Can be derived from:
+* sidewalk density
+* road crossing complexity
+* pedestrian street density
+* street connectivity
+* traffic exposure
+* urban fabric density
+If you don’t have map infra yet, bootstrap from:
+* city center proximity
+* attraction density
+* road class mix
+* manually assigned neighborhood priors
+________________
+
+
+barrier_score
+How much hidden friction exists in reaching / traversing this area.
+Scale: 0–100 where higher = worse
+Include:
+* highways
+* rivers without nearby crossings
+* rail barriers
+* steep climbs
+* large dead-edge blocks
+* restricted access
+* ferry dependency
+* security checkpoints
+* hilltop fort access
+* island access
+________________
+
+
+nearest_transit_distance_m
+Distance to nearest useful transit stop.
+________________
+
+
+nearest_parking_distance_m
+Useful for car-heavy destinations / suburban contexts.
+________________
+
+
+pedestrian_access_score
+How easily a tourist can actually access the place once nearby.
+Scale: 0–100
+Includes:
+* entry clarity
+* wayfinding ease
+* walking entrance quality
+* “hard to actually get to” factor
+________________
+
+
+7.5 INPUT LAYER B — PAIRWISE MOVEMENT GRAPH
+This is the heart of the Route Engine.
+You need a table that says:
+“What does movement from A → B feel like?”
+Not just distance.
+Movement reality.
+________________
+
+
+Table: entity_route_edges
+CREATE TABLE entity_route_edges (
+    from_entity_id BIGINT NOT NULL,
+    to_entity_id BIGINT NOT NULL,
+
+
+    straight_line_distance_m INT NOT NULL,
+    route_distance_m INT NULL,
+    route_duration_walk_min DECIMAL(8,2) NULL,
+    route_duration_drive_min DECIMAL(8,2) NULL,
+    route_duration_transit_min DECIMAL(8,2) NULL,
+
+
+    elevation_gain_m INT NULL,
+    elevation_loss_m INT NULL,
+
+
+    walk_friction_score DECIMAL(6,2) NULL,
+    transit_friction_score DECIMAL(6,2) NULL,
+    access_friction_score DECIMAL(6,2) NULL,
+
+
+    same_local_cluster TINYINT(1) DEFAULT 0,
+    same_district_cluster TINYINT(1) DEFAULT 0,
+    same_movement_zone TINYINT(1) DEFAULT 0,
+
+
+    barrier_crossing_count INT DEFAULT 0,
+    mode_switch_complexity_score DECIMAL(6,2) NULL,
+
+
+    route_coherence_prior DECIMAL(6,2) NULL,
+
+
+    PRIMARY KEY (from_entity_id, to_entity_id),
+    INDEX idx_to_entity (to_entity_id)
+);
+
+
+________________
+
+
+7.6 HOW TO POPULATE entity_route_edges
+You do not need all pairs globally.
+That would explode.
+Instead, generate edges only for likely candidate pairs:
+Good rule:
+For each entity, compute edges to:
+* nearest 50–150 entities
+* entities in same destination / city
+* top-ranked items in nearby districts
+* all major anchors in same destination
+That is enough.
+________________
+
+
+7.7 HOW TO CALCULATE EACH ROUTE EDGE FIELD
+________________
+
+
+7.7.1 straight_line_distance_m
+Use Haversine formula.
+SQL (MySQL-compatible style)
+SELECT
+    a.entity_id AS from_entity_id,
+    b.entity_id AS to_entity_id,
+    ROUND(
+        6371000 * ACOS(
+            COS(RADIANS(a.lat)) * COS(RADIANS(b.lat)) *
+            COS(RADIANS(b.lng) - RADIANS(a.lng)) +
+            SIN(RADIANS(a.lat)) * SIN(RADIANS(b.lat))
+        )
+    ) AS straight_line_distance_m
+FROM entity_geo_profile a
+JOIN entity_geo_profile b
+    ON a.entity_id <> b.entity_id;
+
+
+________________
+
+
+7.7.2 route_distance_m, route_duration_walk_min, route_duration_drive_min, route_duration_transit_min
+Best source:
+* OSRM
+* GraphHopper
+* Valhalla
+* Google Distance Matrix / Routes API
+* Mapbox Directions
+These should ideally be precomputed offline in batches.
+________________
+
+
+7.7.3 elevation_gain_m
+If you have path polyline: sum positive elevation deltas.
+If not, approximate:
+elevation_gain_m ≈ max(0, to_elevation - from_elevation) * slope_multiplier
+
+
+Bootstrap version:
+CASE
+    WHEN b.elevation_m > a.elevation_m
+    THEN b.elevation_m - a.elevation_m
+    ELSE 0
+END AS elevation_gain_m
+
+
+________________
+
+
+7.7.4 same_local_cluster, same_district_cluster, same_movement_zone
+CASE WHEN a.local_cluster_id = b.local_cluster_id THEN 1 ELSE 0 END
+CASE WHEN a.district_cluster_id = b.district_cluster_id THEN 1 ELSE 0 END
+CASE WHEN a.movement_zone_id = b.movement_zone_id THEN 1 ELSE 0 END
+
+
+________________
+
+
+7.7.5 walk_friction_score
+Scale: 0–100, higher = worse
+This should represent:
+“How annoying is it to walk this move?”
+Recommended formula
+walk_friction_score =
+    0.35 * normalized_walk_time
+  + 0.20 * normalized_elevation_gain
+  + 0.20 * avg_barrier_score
+  + 0.15 * low_walkability_penalty
+  + 0.10 * access_friction
+
+
+Expanded
+normalized_walk_time         = min(route_duration_walk_min / 30, 1) * 100
+normalized_elevation_gain    = min(elevation_gain_m / 80, 1) * 100
+avg_barrier_score            = avg(from.barrier_score, to.barrier_score)
+low_walkability_penalty      = 100 - avg(from.walkability_score, to.walkability_score)
+access_friction              = avg(access difficulty of both ends)
+
+
+Example SQL sketch
+UPDATE entity_route_edges e
+JOIN entity_geo_profile a ON e.from_entity_id = a.entity_id
+JOIN entity_geo_profile b ON e.to_entity_id = b.entity_id
+SET e.walk_friction_score =
+    (
+        0.35 * LEAST(e.route_duration_walk_min / 30, 1) * 100
+      + 0.20 * LEAST(e.elevation_gain_m / 80, 1) * 100
+      + 0.20 * ((COALESCE(a.barrier_score, 30) + COALESCE(b.barrier_score, 30)) / 2)
+      + 0.15 * (100 - ((COALESCE(a.walkability_score, 60) + COALESCE(b.walkability_score, 60)) / 2))
+      + 0.10 * (100 - ((COALESCE(a.pedestrian_access_score, 70) + COALESCE(b.pedestrian_access_score, 70)) / 2))
+    );
+
+
+________________
+
+
+7.7.6 transit_friction_score
+Represents:
+“How annoying is it to reach this by transit?”
+Include:
+* transfer burden
+* station access burden
+* waiting complexity
+* not-worth-it transit moves
+Formula
+transit_friction_score =
+    0.45 * normalized_transit_time
+  + 0.20 * transfer_penalty
+  + 0.15 * station_access_penalty
+  + 0.10 * schedule_uncertainty_penalty
+  + 0.10 * mode mismatch penalty
+
+
+If you don’t have full transit data yet, use a simplified proxy:
+transit_friction_score =
+    0.6 * min(route_duration_transit_min / 45, 1) * 100
+  + 0.2 * avg(nearest_transit_distance_m / 800 capped)
+  + 0.2 * barrier complexity proxy
+
+
+________________
+
+
+7.7.7 access_friction_score
+Represents:
+“Even if it’s near, is it annoying to actually get into / reach?”
+Include:
+* long entry walks
+* confusing access
+* queue-gated entry zones
+* hilltop approach
+* ferry transfer
+* security screening
+* disconnected entrances
+Formula
+access_friction_score =
+    0.4 * barrier_score
+  + 0.3 * (100 - pedestrian_access_score)
+  + 0.2 * entry_distance_penalty
+  + 0.1 * complexity prior
+
+
+________________
+
+
+7.7.8 mode_switch_complexity_score
+Represents:
+“Does this move require awkward switching of movement mode?”
+Examples:
+* walk → metro → walk → shuttle
+* car needed unexpectedly
+* ferry + shuttle
+* steep uphill taxi dependency
+Suggested values
+Situation
+	Score
+	Same walkable cluster
+	5
+	Easy walk
+	10
+	Easy transit
+	25
+	Transit + moderate transfer
+	45
+	Requires vehicle / mode shift
+	60
+	Ferry / shuttle / awkward transfer
+	75–90
+	________________
+
+
+7.7.9 route_coherence_prior
+This is a very important field.
+It should capture:
+“Even before current feed context, does A → B generally feel like a natural tourist move?”
+This is not just distance.
+Examples:
+* Louvre → Tuileries = very coherent
+* Eiffel Tower → Arc de Triomphe = coherent
+* Beach club → sunrise monastery = low coherence
+* Historic fort → old bazaar = coherent
+* random aquarium → suburban mall = weak
+________________
+
+
+How to populate route_coherence_prior
+Formula
+route_coherence_prior =
+    35% cluster continuity
+  + 20% distance reasonability
+  + 15% tourist co-visit affinity
+  + 15% movement zone continuity
+  + 15% semantic day-fit
+
+
+________________
+
+
+Components
+A. Cluster continuity
+same_local_cluster    => +100
+same_district_cluster => +75
+same_movement_zone    => +60
+else                  => lower
+
+
+________________
+
+
+B. Distance reasonability
+Use walk or travel time penalty:
+distance_reasonability =
+    100 - min(route_duration_walk_min / 40, 1) * 100
+
+
+Or use best available mode.
+________________
+
+
+C. Tourist co-visit affinity
+This is very powerful if you have user sequences / itinerary data.
+If users frequently:
+* view,
+* save,
+* visit,
+* review,
+* or co-click A and B together
+Then A→B gets stronger coherence.
+Example formula
+co_visit_affinity = min(log(1 + co_visit_count) / log(1 + max_count), 1) * 100
+
+
+________________
+
+
+D. Movement zone continuity
+Same movement corridor / district / tourist belt.
+________________
+
+
+E. Semantic day-fit
+Example:
+* sunrise point → breakfast place = good
+* museum → lunch district = good
+* late dinner → family museum = poor
+This can come from your Role Assignment + Action Horizon + Opportunity layers.
+________________
+
+
+SQL-style example
+UPDATE entity_route_edges e
+SET route_coherence_prior =
+    (
+        0.35 * (
+            CASE
+                WHEN same_local_cluster = 1 THEN 100
+                WHEN same_district_cluster = 1 THEN 75
+                WHEN same_movement_zone = 1 THEN 60
+                ELSE 25
+            END
+        )
+      + 0.20 * (100 - LEAST(COALESCE(route_duration_walk_min, 60) / 40, 1) * 100)
+      + 0.15 * COALESCE(co_visit_affinity_score, 40)
+      + 0.15 * (
+            CASE
+                WHEN same_movement_zone = 1 THEN 100
+                ELSE 40
+            END
+        )
+      + 0.15 * COALESCE(day_fit_score, 50)
+    );
+
+
+You can add co_visit_affinity_score and day_fit_score to the edge table or join them from helper tables.
+________________
+
+
+7.8 INPUT LAYER C — CURRENT JOURNEY STATE
+The Route Engine should never score a candidate in isolation.
+It must score it relative to where the user seems to be in their day.
+You need a current state table or computed state object.
+________________
+
+
+Table: user_journey_state
+CREATE TABLE user_journey_state (
+    user_id BIGINT NOT NULL,
+    trip_id BIGINT NULL,
+
+
+    current_anchor_entity_id BIGINT NULL,
+    previous_anchor_entity_id BIGINT NULL,
+
+
+    current_lat DECIMAL(10,7) NULL,
+    current_lng DECIMAL(10,7) NULL,
+
+
+    active_movement_zone_id BIGINT NULL,
+    active_local_cluster_id BIGINT NULL,
+    active_district_cluster_id BIGINT NULL,
+
+
+    route_pattern VARCHAR(50) NULL,
+    route_direction_bearing DECIMAL(6,2) NULL,
+
+
+    last_entity_id BIGINT NULL,
+    second_last_entity_id BIGINT NULL,
+    third_last_entity_id BIGINT NULL,
+
+
+    cumulative_distance_today_m INT NULL,
+    cumulative_walk_time_today_min DECIMAL(8,2) NULL,
+    cumulative_movement_burden_score DECIMAL(8,2) NULL,
+
+
+    current_mode_preference VARCHAR(20) NULL,
+    fatigue_state VARCHAR(20) NULL,
+
+
+    updated_at TIMESTAMP NULL,
+
+
+    PRIMARY KEY (user_id, trip_id)
+);
+
+
+________________
+
+
+7.9 WHAT EACH JOURNEY STATE FIELD MEANS
+________________
+
+
+current_anchor_entity_id
+Where the feed currently feels centered.
+This is more important than “last shown item”.
+________________
+
+
+current_lat, current_lng
+Can come from:
+* actual GPS (if available)
+* hotel / stay location
+* current anchor centroid
+* inferred recent cluster center
+________________
+
+
+active_movement_zone_id
+Where the traveler is effectively operating right now.
+________________
+
+
+route_direction_bearing
+This is very useful.
+It represents the current directional drift of the day.
+Example:
+* moving north through riverfront
+* heading from old town toward museum district
+This helps avoid:
+* bounce north → south → north → south
+________________
+
+
+How to calculate bearing
+From recent movement:
+* second_last → last
+* or previous_anchor → current_anchor
+Formula
+bearing = atan2(Δlng, Δlat) converted to degrees 0–360
+
+
+You can compute this in app code or SQL if needed.
+________________
+
+
+cumulative_movement_burden_score
+This is crucial.
+It tells the system:
+“How much movement tax has the traveler already paid today?”
+If already high:
+* Route Engine should penalize further detours harder
+* Sequence Engine should prefer recovery / local cluster items
+________________
+
+
+7.10 INPUT LAYER D — CANDIDATE ROUTE EVALUATION TABLE
+This is the actual scoring output.
+This is what the feed ranking engine will use.
+________________
+
+
+Table: candidate_route_scores
+CREATE TABLE candidate_route_scores (
+    user_id BIGINT NOT NULL,
+    trip_id BIGINT NULL,
+    candidate_entity_id BIGINT NOT NULL,
+
+
+    reference_entity_id BIGINT NULL,
+    route_pattern VARCHAR(50) NULL,
+
+
+    route_continuity_score DECIMAL(6,2) NULL,
+    movement_cost_score DECIMAL(6,2) NULL,
+    direction_coherence_score DECIMAL(6,2) NULL,
+    backtrack_penalty_score DECIMAL(6,2) NULL,
+    cluster_fit_score DECIMAL(6,2) NULL,
+    excursion_penalty_score DECIMAL(6,2) NULL,
+    route_override_score DECIMAL(6,2) NULL,
+
+
+    final_route_score DECIMAL(6,2) NULL,
+
+
+    computed_at TIMESTAMP NULL,
+
+
+    PRIMARY KEY (user_id, trip_id, candidate_entity_id),
+    INDEX idx_route_score (final_route_score)
+);
+
+
+This is where the Route Engine becomes directly consumable.
+________________
+
+
+7.11 CORE ROUTE ENGINE OUTPUTS
+Your original outputs were:
+* route_continuity_score
+* movement_cost_score
+* route_pattern
+Those are correct, but for a production-grade engine, you should internally compute a few supporting scores too.
+Recommended outputs
+Primary outputs
+* route_continuity_score
+* movement_cost_score
+* route_pattern
+Supporting outputs
+* direction_coherence_score
+* backtrack_penalty_score
+* cluster_fit_score
+* excursion_penalty_score
+* route_override_score
+* final_route_score
+These make the system explainable and tunable.
+________________
+
+
+7.12 HOW TO CALCULATE movement_cost_score
+This should answer:
+“How expensive is it to go there right now?”
+Scale: 0–100
+* 100 = very easy
+* 0 = painful / impractical
+________________
+
+
+Recommended formula
+movement_cost_score =
+    100 - movement_cost_burden
+
+
+Where:
+movement_cost_burden =
+    30% travel_time_burden
+  + 20% walk_friction
+  + 15% elevation_burden
+  + 15% access_friction
+  + 10% mode_switch_complexity
+  + 10% fatigue_adjustment
+
+
+________________
+
+
+Component formulas
+1. Travel time burden
+Use best available tourist-relevant mode.
+travel_time_burden = min(best_duration_min / 45, 1) * 100
+
+
+Where:
+best_duration_min =
+    min(
+        walk_duration_if_reasonable,
+        drive_duration_if_user_mode_allows,
+        transit_duration_if_city_supports
+    )
+
+
+A good tourist heuristic:
+* if walk < 25 min → prefer walk
+* else if transit easy → use transit
+* else use drive/taxi estimate
+________________
+
+
+2. Walk friction
+From edge table.
+________________
+
+
+3. Elevation burden
+elevation_burden = min(elevation_gain_m / 120, 1) * 100
+
+
+________________
+
+
+4. Access friction
+From edge table.
+________________
+
+
+5. Mode switch complexity
+From edge table.
+________________
+
+
+6. Fatigue adjustment
+If user has already had a movement-heavy day, penalize cost harder.
+fatigue_adjustment =
+    CASE
+      WHEN cumulative_movement_burden_score >= 80 THEN 90
+      WHEN cumulative_movement_burden_score >= 60 THEN 70
+      WHEN cumulative_movement_burden_score >= 40 THEN 45
+      ELSE 20
+    END
+
+
+________________
+
+
+SQL-style computation
+UPDATE candidate_route_scores crs
+JOIN entity_route_edges e
+  ON crs.reference_entity_id = e.from_entity_id
+ AND crs.candidate_entity_id = e.to_entity_id
+JOIN user_journey_state ujs
+  ON crs.user_id = ujs.user_id
+ AND (crs.trip_id <=> ujs.trip_id)
+SET crs.movement_cost_score =
+    GREATEST(
+        0,
+        100 - (
+            0.30 * LEAST(COALESCE(e.route_duration_walk_min, 60) / 45, 1) * 100
+          + 0.20 * COALESCE(e.walk_friction_score, 40)
+          + 0.15 * LEAST(COALESCE(e.elevation_gain_m, 0) / 120, 1) * 100
+          + 0.15 * COALESCE(e.access_friction_score, 30)
+          + 0.10 * COALESCE(e.mode_switch_complexity_score, 20)
+          + 0.10 * LEAST(COALESCE(ujs.cumulative_movement_burden_score, 20), 100)
+        )
+    );
+
+
+You can later replace walk duration with best-mode duration.
+________________
+
+
+7.13 HOW TO CALCULATE route_continuity_score
+This is the most important Route Engine output.
+It answers:
+“Does this next item preserve the shape of the day?”
+Scale: 0–100
+* 100 = feels naturally next
+* 0 = feels spatially stupid
+________________
+
+
+Recommended formula
+route_continuity_score =
+    30% route_coherence_prior
+  + 20% cluster_fit_score
+  + 20% direction_coherence_score
+  + 15% anti_backtrack_score
+  + 15% anti_jump_score
+
+
+________________
+
+
+7.13.1 cluster_fit_score
+This asks:
+“Does this fit the traveler’s current operating area?”
+Suggested rules
+Condition
+	Score
+	same local cluster
+	100
+	same district cluster
+	80
+	same movement zone
+	65
+	adjacent zone
+	50
+	unrelated jump
+	20
+	SQL
+UPDATE candidate_route_scores crs
+JOIN entity_geo_profile c ON crs.candidate_entity_id = c.entity_id
+JOIN user_journey_state ujs
+  ON crs.user_id = ujs.user_id
+ AND (crs.trip_id <=> ujs.trip_id)
+SET crs.cluster_fit_score =
+    CASE
+        WHEN c.local_cluster_id = ujs.active_local_cluster_id THEN 100
+        WHEN c.district_cluster_id = ujs.active_district_cluster_id THEN 80
+        WHEN c.movement_zone_id = ujs.active_movement_zone_id THEN 65
+        ELSE 25
+    END;
+
+
+You can later add adjacency tables for smarter neighboring zones.
+________________
+
+
+7.13.2 direction_coherence_score
+This is what stops zig-zag feed behavior.
+It asks:
+“Does this continue the directional drift of the day?”
+________________
+
+
+Step 1: Compute current day bearing
+From previous anchor → current anchor.
+Step 2: Compute candidate bearing
+From current anchor → candidate.
+Step 3: Compare angular difference
+angle_diff = absolute smallest difference between two bearings
+
+
+Scoring
+direction_coherence_score =
+    100 - min(angle_diff / 180, 1) * 100
+
+
+So:
+* same direction → near 100
+* perpendicular → ~50
+* reverse/backtrack → near 0
+________________
+
+
+SQL-style pseudo
+Usually easier in app code, but logic is:
+bearing_diff = ABS(current_bearing - candidate_bearing)
+if bearing_diff > 180 then bearing_diff = 360 - bearing_diff
+score = 100 - (bearing_diff / 180 * 100)
+
+
+________________
+
+
+7.13.3 backtrack_penalty_score
+This should detect:
+“Are we making the traveler go back toward already-covered space?”
+Very important.
+________________
+
+
+Recommended logic
+A candidate is backtracking if it is:
+* closer to second_last / third_last cluster
+* directionally opposite current route
+* inside a previously exited movement zone
+________________
+
+
+Simplified scoring
+backtrack_penalty_score =
+    100 if no backtrack
+    70  if mild
+    40  if noticeable
+    10  if strong backtrack
+
+
+Formula version
+backtrack_penalty =
+    50% reverse_direction_penalty
+  + 30% previously_exited_zone_penalty
+  + 20% return_to_old_cluster_penalty
+
+
+Then:
+anti_backtrack_score = 100 - backtrack_penalty
+
+
+________________
+
+
+7.13.4 anti_jump_score
+This asks:
+“Is this too disconnected from the current route?”
+Use:
+* district mismatch
+* movement zone mismatch
+* excessive travel time
+* poor route coherence prior
+Formula
+jump_burden =
+    40% travel_time_jump
+  + 30% cluster_disconnect
+  + 30% mode_shift_jump
+
+
+Then:
+anti_jump_score = 100 - jump_burden
+
+
+________________
+
+
+Final SQL-style continuity formula
+UPDATE candidate_route_scores crs
+JOIN entity_route_edges e
+  ON crs.reference_entity_id = e.from_entity_id
+ AND crs.candidate_entity_id = e.to_entity_id
+SET crs.route_continuity_score =
+    (
+        0.30 * COALESCE(e.route_coherence_prior, 50)
+      + 0.20 * COALESCE(crs.cluster_fit_score, 50)
+      + 0.20 * COALESCE(crs.direction_coherence_score, 50)
+      + 0.15 * (100 - COALESCE(crs.backtrack_penalty_score, 30))
+      + 0.15 * (100 - COALESCE(crs.excursion_penalty_score, 25))
+    );
+
+
+________________
+
+
+7.14 HOW TO DETERMINE route_pattern
+This should not be guessed loosely.
+It should be inferred from recent route geometry.
+This matters a lot because the same candidate can be:
+* bad in a cluster
+* good in an anchor jump
+* perfect in an excursion
+________________
+
+
+7.15 RECOMMENDED ROUTE PATTERNS
+Use these:
+LINEAR
+CLUSTER
+ANCHOR_JUMP
+EXCURSION
+HUB_AND_SPOKE
+LOOP
+RECOVERY_LOCAL
+
+
+You originally mentioned:
+* linear
+* cluster
+* anchor_jump
+* excursion
+Those are core. The two additions are highly useful:
+* HUB_AND_SPOKE → common for hotel-based travel
+* RECOVERY_LOCAL → movement-light mode after heavy movement
+________________
+
+
+7.16 HOW TO INFER ROUTE PATTERN
+Use recent last 3–5 meaningful route points:
+* shown items accepted / clicked / saved / viewed deeply
+* or anchor transitions
+________________
+
+
+Features to compute
+For recent points P1, P2, P3, P4:
+A. Average step distance
+avg_step_distance_m
+
+
+B. Max step distance
+max_step_distance_m
+
+
+C. Zone switching rate
+zone_switch_rate = zone changes / step count
+
+
+D. Return-to-origin tendency
+distance(last_point, trip_center)
+
+
+E. Bearing consistency
+How similar are step directions?
+________________
+
+
+Pattern rules
+1. CLUSTER
+If:
+* avg step distance low
+* mostly same local/district cluster
+* low directional commitment
+avg_step_distance < 1200m
+and zone_switch_rate low
+
+
+________________
+
+
+2. LINEAR
+If:
+* step directions align
+* route progresses without return
+* moderate movement span
+bearing consistency high
+and backtracking low
+
+
+________________
+
+
+3. ANCHOR_JUMP
+If:
+* one major move between clusters/zones
+* followed by local exploration
+one large jump > threshold
+then local cluster behavior
+
+
+________________
+
+
+4. EXCURSION
+If:
+* temporary outward move from main cluster
+* likely return later
+move out from hub/center
+but candidate still references main anchor area
+
+
+________________
+
+
+5. HUB_AND_SPOKE
+If:
+* multiple moves radiate around hotel / center / station
+* repeated return to same hub zone
+________________
+
+
+6. LOOP
+If:
+* route gradually curves and returns toward start/hub
+* not abrupt backtracking
+________________
+
+
+7. RECOVERY_LOCAL
+If:
+* cumulative movement burden high
+* recent movement cost high
+* current candidates stay hyperlocal
+________________
+
+
+SQL helper table
+CREATE TABLE user_route_pattern_state (
+    user_id BIGINT NOT NULL,
+    trip_id BIGINT NULL,
+
+
+    avg_step_distance_m DECIMAL(8,2) NULL,
+    max_step_distance_m DECIMAL(8,2) NULL,
+    zone_switch_rate DECIMAL(6,2) NULL,
+    bearing_consistency_score DECIMAL(6,2) NULL,
+    return_to_hub_tendency_score DECIMAL(6,2) NULL,
+    recent_movement_burden_score DECIMAL(6,2) NULL,
+
+
+    inferred_route_pattern VARCHAR(50) NULL,
+
+
+    computed_at TIMESTAMP NULL,
+
+
+    PRIMARY KEY (user_id, trip_id)
+);
+
+
+________________
+
+
+Pattern assignment SQL-style example
+UPDATE user_route_pattern_state
+SET inferred_route_pattern =
+    CASE
+        WHEN avg_step_distance_m < 1200
+             AND zone_switch_rate < 0.25
+        THEN 'CLUSTER'
+
+
+        WHEN bearing_consistency_score >= 70
+             AND zone_switch_rate <= 0.50
+             AND return_to_hub_tendency_score < 40
+        THEN 'LINEAR'
+
+
+        WHEN max_step_distance_m >= 4000
+             AND avg_step_distance_m < 2000
+        THEN 'ANCHOR_JUMP'
+
+
+        WHEN return_to_hub_tendency_score >= 70
+             AND zone_switch_rate >= 0.40
+        THEN 'HUB_AND_SPOKE'
+
+
+        WHEN recent_movement_burden_score >= 75
+             AND avg_step_distance_m < 800
+        THEN 'RECOVERY_LOCAL'
+
+
+        ELSE 'EXCURSION'
+    END;
+
+
+This is a heuristic starter. Later you can improve via sequence learning.
+________________
+
+
+7.17 HOW TO COMPUTE excursion_penalty_score
+This answers:
+“How much does this candidate pull us away from the current route shape?”
+This is not always bad.
+Sometimes a small excursion is worth it.
+________________
+
+
+Formula
+excursion_penalty_score =
+    35% route_deviation_distance
+  + 25% return_cost
+  + 20% cluster_disconnect
+  + 20% movement_burden
+
+
+High penalty if:
+* the candidate is far off current directional path
+* and hard to recover from afterward
+This is extremely useful in itinerary-style flow.
+________________
+
+
+7.18 ROUTE OVERRIDE LOGIC (VERY IMPORTANT)
+This is where your module becomes intelligent instead of rigid.
+A route-breaking item should still be allowed if it is worth it.
+________________
+
+
+Table: route_override_factors
+CREATE TABLE route_override_factors (
+    user_id BIGINT NOT NULL,
+    trip_id BIGINT NULL,
+    candidate_entity_id BIGINT NOT NULL,
+
+
+    anchor_override_score DECIMAL(6,2) NULL,
+    opportunity_override_score DECIMAL(6,2) NULL,
+    collective_destination_override_score DECIMAL(6,2) NULL,
+    trip_importance_override_score DECIMAL(6,2) NULL,
+
+
+    route_override_score DECIMAL(6,2) NULL,
+
+
+    PRIMARY KEY (user_id, trip_id, candidate_entity_id)
+);
+
+
+________________
+
+
+Formula
+route_override_score =
+    35% anchor_override
+  + 30% opportunity_override
+  + 20% collective_destination_override
+  + 15% trip_importance_override
+
+
+________________
+
+
+Interpretation
+If:
+* route score is mediocre
+* but override is very high
+Then the item may still win.
+This is exactly how a real traveler behaves:
+“Yes it’s out of the way, but it’s iconic / sunset-only / the whole district is worth it.”
+________________
+
+
+7.19 FINAL ROUTE SCORE
+Now combine everything.
+________________
+
+
+Recommended formula
+final_route_score =
+    45% route_continuity_score
+  + 35% movement_cost_score
+  + 20% route_override_score
+
+
+Why this weighting?
+Because:
+* continuity matters most
+* movement pain matters second
+* override matters enough to rescue exceptional cases
+________________
+
+
+SQL
+UPDATE candidate_route_scores crs
+JOIN route_override_factors rof
+  ON crs.user_id = rof.user_id
+ AND (crs.trip_id <=> rof.trip_id)
+ AND crs.candidate_entity_id = rof.candidate_entity_id
+SET crs.route_override_score = COALESCE(rof.route_override_score, 0),
+    crs.final_route_score =
+    (
+        0.45 * COALESCE(crs.route_continuity_score, 50)
+      + 0.35 * COALESCE(crs.movement_cost_score, 50)
+      + 0.20 * COALESCE(rof.route_override_score, 0)
+    );
+
+
+________________
+
+
+7.20 HOW ROUTE ENGINE SHOULD BE USED IN RANKING
+This module should not decide ranking alone.
+It should feed into your broader ranking stack.
+________________
+
+
+Recommended integration
+candidate_total_score =
+    22% anchor strength
+  + 16% route score
+  + 14% opportunity score
+  + 12% action horizon fit
+  + 12% role fit
+  + 10% sequence rhythm fit
+  + 8% context relevance
+  + 6% novelty / freshness
+
+
+The exact weights can vary, but Route Engine should be a major mid-layer, not the sole decider.
+________________
+
+
+7.21 MINIMUM VIABLE VERSION VS FULL VERSION
+________________
+
+
+MVP Route Engine
+If you want to launch fast, use:
+Required now
+* lat/lng
+* local cluster
+* district cluster
+* movement zone
+* straight-line distance
+* route walk duration
+* elevation gain
+* route_coherence_prior
+* current anchor
+* current zone
+* cumulative movement burden
+Compute:
+* movement_cost_score
+* route_continuity_score
+* route_pattern
+* final_route_score
+That alone gets you a very strong system.
+________________
+
+
+Full Version Later
+Add:
+* real transit friction
+* barrier crossings
+* dynamic traffic
+* mode-aware traveler preferences
+* return-cost modeling
+* learned route patterns from actual user sequences
+* crowd-aware route burden
+* weather-aware walking friction
+That becomes elite-level.
+________________
+
+
+7.22 RECOMMENDED BUILD ORDER
+Build in this order:
+Phase 1
+* entity_geo_profile
+* clustering
+* movement zones
+Phase 2
+* entity_route_edges
+* precompute route distances/durations
+* compute route_coherence_prior
+Phase 3
+* user_journey_state
+* route pattern inference
+* cumulative movement burden
+Phase 4
+* candidate_route_scores
+* compute continuity, movement, override, final score
+Phase 5
+* plug into feed ranker
+That is the correct production order.
+________________
+
+
+7.23 FINAL CONCEPTUAL SUMMARY
+The Route Engine should not think:
+“What is geographically closest?”
+It should think:
+“What would feel naturally next in a tourist’s lived movement through a day?”
+That means it must reward:
+* spatial continuity
+* directional coherence
+* cluster integrity
+* realistic movement cost
+* sensible journey shape
+And it must allow exceptions only when:
+* the destination is truly worth breaking route for
+That is what makes the feed feel guided rather than random.
+________________
+
+
+If you want, I can do the next step and turn this into a fully implementation-ready engineering spec with:
+* all final tables
+* all columns finalized
+* materialized computation pipeline
+* cron / batch order
+* SQL population queries in sequence
+* and how Route Engine plugs into Modules 4, 5, 6, and 8
+So it becomes directly buildable.

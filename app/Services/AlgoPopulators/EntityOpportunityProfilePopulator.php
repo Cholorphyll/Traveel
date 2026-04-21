@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\DB;
 class EntityOpportunityProfilePopulator
 {
     protected $progressCallback = null;
-    protected int $batchSize = 100; // Reduced from 500 to save memory
+    protected int $batchSize = 50;
     protected bool $skipTruncate = false;
 
     /**
@@ -117,8 +117,9 @@ class EntityOpportunityProfilePopulator
                 DB::table('entity_opportunity_profile')->insert($batch);
                 $count += count($batch);
                 $this->log("    Processed {$count} sights...");
+                unset($batch);
                 $batch = [];
-                gc_collect_cycles(); // Free memory
+                gc_collect_cycles();
             }
         }
 
@@ -240,8 +241,9 @@ class EntityOpportunityProfilePopulator
                 DB::table('entity_opportunity_profile')->insert($batch);
                 $count += count($batch);
                 $this->log("    Processed {$count} restaurants...");
+                unset($batch);
                 $batch = [];
-                gc_collect_cycles(); // Free memory
+                gc_collect_cycles();
             }
         }
 
@@ -370,8 +372,9 @@ class EntityOpportunityProfilePopulator
                 DB::table('entity_opportunity_profile')->insert($batch);
                 $count += count($batch);
                 $this->log("    Processed {$count} experiences...");
+                unset($batch);
                 $batch = [];
-                gc_collect_cycles(); // Free memory
+                gc_collect_cycles();
             }
         }
 

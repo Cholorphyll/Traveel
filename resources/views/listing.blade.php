@@ -2011,6 +2011,61 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                                 $stepOrder = $feedItem['step_order'];
                                 $itemType = $feedItem['type']; // 'attraction', 'experience', or 'restaurant'
                                 $displayType = $feedItem['display_type'] ?? 'card_large';
+                                $cardType = $feedItem['card_type'] ?? 'PRIMARY_ENTITY';
+                            @endphp
+
+                            {{-- COLLECTION Card — carousel of themed items --}}
+                            @if ($cardType === 'COLLECTION' && !empty($feedItem['items']))
+                                @php
+                                    $collTitle = $feedItem['collection_title'] ?? 'Explore more';
+                                    $collType  = $feedItem['collection_type'] ?? 'TRENDING';
+                                @endphp
+                                <div class="card__Container collection__card" style="margin-bottom: 16px;">
+                                    <div class="card__Box" style="border-radius: 12px; overflow: hidden;">
+                                        <div class="card__title" style="padding: 12px 16px 4px;">
+                                            <h6 style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6c757d;">{{ $collType }}</h6>
+                                        </div>
+                                        <div class="card__Subtitle" style="padding: 0 16px 8px;">
+                                            <h5 style="font-size: 18px; font-weight: 600;">{{ $collTitle }}</h5>
+                                        </div>
+                                        <div class="tr-market-slider sliderNew" style="padding: 0 8px 16px;">
+                                            @foreach ($feedItem['items'] as $collItem)
+                                                @php
+                                                    $collEntityType = $collItem['entity_type'] ?? 'sight';
+                                                    $collBladeType  = $collEntityType === 'sight' ? 'attraction' : $collEntityType;
+                                                    $collHref = $collBladeType === 'experience'
+                                                        ? route('experince', [($collItem['slugid'] ?? '').'-'.str_replace('exp_', '', $collItem['entity_id'] ?? '').'-'.($collItem['slug'] ?? '')])
+                                                        : ($collBladeType === 'restaurant'
+                                                            ? url('rd-'.($collItem['slugid'] ?? '').'-'.preg_replace('/[^0-9]/', '', $collItem['entity_id'] ?? '').'-'.($collItem['slug'] ?? ''))
+                                                            : url('at-'.($collItem['slugid'] ?? '').'-'.($collItem['entity_id'] ?? '').'-'.strtolower($collItem['slug'] ?? '')));
+                                                    $collImg = $collItem['image'] ?? asset('frontend/hotel-detail/images/Hotel lobby-image.png');
+                                                    if (!empty($collImg) && !str_contains($collImg, 'http') && !str_contains($collImg, 'frontend')) {
+                                                        $collImg = "https://image-resize-5q14d76mz-cholorphylls-projects.vercel.app/api/resize?url={$collImg}&width=320&height=300";
+                                                    }
+                                                @endphp
+                                                <div class="tr-store">
+                                                    <a href="{{ $collHref }}">
+                                                        <img src="{{ $collImg }}" alt="{{ $collItem['title'] ?? '' }}" onerror="this.onerror=null; this.src='{{ asset('frontend/hotel-detail/images/Hotel lobby-image.png') }}';" loading="lazy">
+                                                    </a>
+                                                    <div class="also__AtSliderDetails">
+                                                        <p>{{ ucfirst($collBladeType) }}</p>
+                                                        <div class="also__title">
+                                                            <h4>{{ $collItem['title'] ?? '' }}</h4>
+                                                        </div>
+                                                        <div class="card__listSection">
+                                                            <div class="card__details">
+                                                                <span><img src="{{ asset('explore/images/icons/heart.svg') }}" alt="Rating" loading="lazy"></span>
+                                                                <span>{{ $collItem['rating'] ?? '85' }}%</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                </div>
+                            @else
+                            @php
                                 
                                 // Get image - use from data or fetch from sightImages
                                 $displayImage = asset('frontend/hotel-detail/images/Hotel lobby-image.png');
@@ -2137,7 +2192,60 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                                         @endphp
                                         <p class="card__description">{{ $truncated }}</p>
                                     @endif
-                            
+
+                            {{-- Context Strip Sections (ENTITY_WITH_CONTEXT / HYBRID) --}}
+                            @if (in_array($cardType, ['ENTITY_WITH_CONTEXT', 'HYBRID']) && !empty($feedItem['sections']))
+                                @foreach ($feedItem['sections'] as $section)
+                                    <div class="also__AtSection" style="margin-top: 8px;">
+                                        <div class="divider">
+                                            <span>{{ $section['label'] ?? 'Nearby' }}</span>
+                                        </div>
+                                        <div class="tr-market-slider sliderNew">
+                                            @foreach ($section['items'] ?? [] as $ctxItem)
+                                                @php
+                                                    $ctxEntityType = $ctxItem['entity_type'] ?? 'sight';
+                                                    $ctxBladeType  = $ctxEntityType === 'sight' ? 'attraction' : $ctxEntityType;
+                                                    $ctxHref = $ctxBladeType === 'experience'
+                                                        ? route('experince', [($ctxItem['slugid'] ?? '').'-'.str_replace('exp_', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? '')])
+                                                        : ($ctxBladeType === 'restaurant'
+                                                            ? url('rd-'.($ctxItem['slugid'] ?? '').'-'.preg_replace('/[^0-9]/', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? ''))
+                                                            : url('at-'.($ctxItem['slugid'] ?? '').'-'.($ctxItem['entity_id'] ?? '').'-'.strtolower($ctxItem['slug'] ?? '')));
+                                                    $ctxImg = $ctxItem['image'] ?? asset('frontend/hotel-detail/images/Hotel lobby-image.png');
+                                                    if (!empty($ctxImg) && !str_contains($ctxImg, 'http') && !str_contains($ctxImg, 'frontend')) {
+                                                        $ctxImg = "https://image-resize-5q14d76mz-cholorphylls-projects.vercel.app/api/resize?url={$ctxImg}&width=320&height=300";
+                                                    }
+                                                @endphp
+                                                <div class="tr-store">
+                                                    <a href="{{ $ctxHref }}">
+                                                        <img src="{{ $ctxImg }}" alt="{{ $ctxItem['title'] ?? '' }}" onerror="this.onerror=null; this.src='{{ asset('frontend/hotel-detail/images/Hotel lobby-image.png') }}';" loading="lazy">
+                                                        <div class="icon__slider">
+                                                            <img src="{{ asset('explore/images/icons/bookmark.svg') }}" alt="Bookmark" loading="lazy">
+                                                        </div>
+                                                    </a>
+                                                    <div class="also__AtSliderDetails">
+                                                        <p>{{ ucfirst($ctxBladeType) }}</p>
+                                                        <div class="also__title">
+                                                            <h4>{{ $ctxItem['title'] ?? '' }}</h4>
+                                                        </div>
+                                                        <div class="card__listSection">
+                                                            <div class="card__details">
+                                                                <span><img src="{{ asset('explore/images/icons/heart.svg') }}" alt="Rating" loading="lazy"></span>
+                                                                <span>{{ $ctxItem['rating'] ?? '85' }}%</span>
+                                                            </div>
+                                                        </div>
+                                                        @if (!empty($ctxItem['distance_m']))
+                                                            <ul class="list__also">
+                                                                <li>{{ $ctxItem['distance_m'] < 1000 ? $ctxItem['distance_m'] . 'm' : round($ctxItem['distance_m']/1000, 1) . 'km' }}</li>
+                                                            </ul>
+                                                        @endif
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                @endforeach
+                            @endif
+
                             {{-- Also At Section with Nearby Items --}}
                             @if (!empty($feedItem['also_at']))
                                 <div class="also__AtSection">
@@ -2269,6 +2377,7 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                                 </div>
                             </div>
                             @endif
+                            @endif {{-- end COLLECTION @else --}}
                         @endif
                     @endforeach
                 @elseif (!empty($searchresults) && count($searchresults) > 0)
@@ -2652,7 +2761,7 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                         if (isset($item->Title) && stripos($item->Title, 'Nexus Elante') !== false) {
                             $shoppingItems->push($item);
                             // Debug output
-                            echo "<!-- Found Nexus Elante mall: SightId={$item->SightId}, CategoryId={$item->CategoryId}, Title={$item->Title} -->";
+                            echo "<!-- Found Nexus Elante mall: SightId={$item->SightId}, CategoryId=" . ($item->CategoryId ?? 'n/a') . ", Title={$item->Title} -->";
                             break;
                         }
                     }
@@ -2730,7 +2839,7 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                     // Debug output
                     echo "<!-- Total shopping items found: " . $shoppingItems->count() . " -->";
                     foreach ($shoppingItems as $item) {
-                        echo "<!-- Shopping item: SightId={$item->SightId}, CategoryId={$item->CategoryId}, Title={$item->Title} -->";
+                        echo "<!-- Shopping item: SightId={$item->SightId}, CategoryId=" . ($item->CategoryId ?? 'n/a') . ", Title={$item->Title} -->";
                     }
                 @endphp
                 @foreach ($shoppingItems as $item)
@@ -4516,35 +4625,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  // Load more button functionality
-  const loadMoreBtn = document.querySelector('.tr-load-more');
-  
-  if (loadMoreBtn) {
-    loadMoreBtn.addEventListener('click', function() {
-      // Show loading indicator
-      if (resultsContainer) {
-        resultsContainer.classList.remove('results-loaded');
-      }
-      
-      // Your AJAX call to load more content would go here
-      // After content is loaded, the button should be moved to the bottom
-      
-      // For demonstration, let's simulate loading more content
-      setTimeout(function() {
-        // Hide loading indicator
-        if (resultsContainer) {
-          resultsContainer.classList.add('results-loaded');
-        }
-        
-        // Move the load more button container to the end of the content
-        const loadingContainer = document.querySelector('.tr-loading-container');
-        if (loadingContainer) {
-          const parentElement = loadingContainer.parentElement;
-          parentElement.appendChild(loadingContainer);
-        }
-      }, 1000);
-    });
-  }
 });
 </script>
 

@@ -554,8 +554,9 @@ function checkScroll() {
 
 window.addEventListener('scroll', checkScroll);
 
-document.querySelector('.tr-load-more').addEventListener('click', function() {
-    loadMoreContent();
-});
-
-loadMoreContent();
+const _loadMoreBtn = document.querySelector('.tr-load-more');
+if (_loadMoreBtn) {
+    _loadMoreBtn.addEventListener('click', function() {
+        loadMoreContent();
+    });
+}

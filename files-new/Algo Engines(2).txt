@@ -1,0 +1,1385 @@
+﻿MODULE — USER / TRIP STATE LAYER
+1) PURPOSE
+This layer creates a single live row (or object) that answers:
+* Where is the user right now?
+* What area are they currently in or near?
+* What major attraction or trip cluster are they orbiting?
+* Are they just starting the day, mid-flow, or winding down?
+* Are they moving fast, lingering, zig-zagging, or progressing naturally?
+* What is their likely energy state and current intent mode?
+This becomes input into:
+* Eligibility Engine
+* Opportunity Engine
+* Route Engine
+* Feed Shape Engine
+* Slot Ranking Engine
+* Moment Framing Engine
+________________
+
+
+2) DESIGN PRINCIPLE
+This layer should represent dynamic truth, not static preference.
+So avoid things like:
+* “user likes museums”
+* “user is a foodie”
+That belongs elsewhere.
+This layer should instead capture things like:
+* “user is currently near old town”
+* “they just finished two heavy cultural items”
+* “they’ve already covered 65% of nearby must-sees”
+* “they’re drifting toward the riverfront at sunset”
+* “they are probably in recovery mode”
+That is what makes a tourist feed feel alive.
+________________
+
+
+3) RECOMMENDED STORAGE MODEL
+You should maintain this as a materialized session-state object.
+Recommended table:
+user_trip_state
+CREATE TABLE user_trip_state (
+    session_id VARCHAR(100) PRIMARY KEY,
+    user_id BIGINT NULL,
+    location_id BIGINT NULL,
+
+
+    -- spatial state
+    user_lat DECIMAL(10,7) NULL,
+    user_lng DECIMAL(10,7) NULL,
+    current_area VARCHAR(255) NULL,
+    current_area_id BIGINT NULL,
+    nearest_anchor_id BIGINT NULL,
+    nearest_anchor_distance_m INT NULL,
+
+
+    -- trip progress
+    anchor_coverage_percent DECIMAL(5,2) NULL,
+    trip_stage VARCHAR(50) NULL,
+    trip_day_index INT NULL,
+    local_session_age_min INT NULL,
+
+
+    -- energy / rhythm
+    last_item_type_seen VARCHAR(50) NULL,
+    last_item_energy DECIMAL(5,2) NULL,
+    current_energy_state VARCHAR(50) NULL,
+    rhythm_density_score DECIMAL(5,2) NULL,
+    fatigue_score DECIMAL(5,2) NULL,
+
+
+    -- movement
+    movement_pattern VARCHAR(50) NULL,
+    current_directionality VARCHAR(50) NULL,
+    movement_speed_kmh DECIMAL(5,2) NULL,
+    route_coherence_score DECIMAL(5,2) NULL,
+
+
+    -- inferred mode
+    group_mode VARCHAR(50) NULL,
+    likely_intent_mode VARCHAR(50) NULL,
+    confidence_group_mode DECIMAL(5,2) NULL,
+    confidence_intent_mode DECIMAL(5,2) NULL,
+
+
+    -- freshness
+    state_timestamp DATETIME NOT NULL,
+    last_location_ping_at DATETIME NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+________________
+
+
+4) SUPPORTING INPUT TABLES YOU SHOULD HAVE
+To compute this layer properly, you should ideally have access to:
+A. User session movement / interaction logs
+user_session_events
+
+
+Suggested fields:
+session_id
+user_id
+event_time
+event_type
+item_id
+item_type
+lat
+lng
+dwell_seconds
+action_weight
+
+
+Typical event types:
+* feed_impression
+* card_open
+* detail_view
+* save
+* dismiss
+* route_open
+* navigate_click
+* book_click
+* checkin_like_ping
+* location_ping
+________________
+
+
+B. Feedable entities table
+feed_entities
+
+
+Should include:
+* item_id
+* item_type
+* lat / lng
+* area_id
+* anchor_score
+* popularity_score
+* rating
+* dwell profile
+* energy score
+* route role
+* must_see flag
+________________
+
+
+C. Anchor clusters / city areas table
+location_areas
+
+
+Should include:
+* area_id
+* area_name
+* polygon / centroid
+* area_type
+* parent_location_id
+________________
+
+
+D. Anchor attraction table / cluster table
+anchor_entities
+
+
+Should include:
+* item_id
+* anchor_weight
+* area_id
+* lat/lng
+________________
+
+
+5) FIELD-BY-FIELD FINAL SPEC
+________________
+
+
+5.1 SPATIAL STATE
+This answers:
+“Where is the user physically and contextually in the city?”
+________________
+
+
+FIELD 1 — user_lat
+Meaning
+Latest trusted latitude of the user.
+Why it matters
+Used for:
+* nearby opportunity scoring
+* route continuity
+* area matching
+* travel friction
+* directionality
+Populate from
+Most recent high-confidence location ping.
+Source priority
+1. live GPS ping
+2. map interaction center
+3. hotel location / stay location
+4. last engaged entity location
+5. city centroid fallback
+SQL example
+SELECT lat
+FROM user_session_events
+WHERE session_id = :session_id
+  AND lat IS NOT NULL
+ORDER BY event_time DESC
+LIMIT 1;
+
+
+Freshness rule
+If last ping > 90 min old, reduce trust score.
+Recommended companion field
+location_confidence_score
+
+
+Example:
+CASE
+  WHEN TIMESTAMPDIFF(MINUTE, last_location_ping_at, NOW()) <= 15 THEN 1.0
+  WHEN TIMESTAMPDIFF(MINUTE, last_location_ping_at, NOW()) <= 60 THEN 0.8
+  WHEN TIMESTAMPDIFF(MINUTE, last_location_ping_at, NOW()) <= 180 THEN 0.5
+  ELSE 0.2
+END
+
+
+________________
+
+
+FIELD 2 — user_lng
+Same logic as user_lat.
+________________
+
+
+FIELD 3 — current_area
+Meaning
+The neighborhood / district / tourism zone the user is currently in.
+Why it matters
+This is often more important than raw lat/lng because the feed should feel area-aware:
+* “You’re in Old Town”
+* “You’re around the marina”
+* “You’re near the museum quarter”
+Best practice
+Store both:
+* current_area_id
+* current_area
+How to calculate
+Find which polygon contains the user point.
+Best method
+Geospatial point-in-polygon match
+SQL idea (MySQL spatial)
+SELECT area_id, area_name
+FROM location_areas
+WHERE ST_Contains(polygon_geom, ST_SRID(POINT(:lng, :lat), 4326))
+LIMIT 1;
+
+
+Fallback if no polygon match
+Choose nearest area centroid within threshold.
+SELECT area_id, area_name,
+       ST_Distance_Sphere(centroid_geom, ST_SRID(POINT(:lng, :lat), 4326)) AS dist_m
+FROM location_areas
+WHERE location_id = :location_id
+ORDER BY dist_m ASC
+LIMIT 1;
+
+
+Suggested thresholds
+* within polygon → strong match
+* centroid within 1.2 km → acceptable fallback
+* else → use broader city-center area
+Useful companion field
+current_area_confidence
+
+
+________________
+
+
+FIELD 4 — nearest_anchor
+Meaning
+The most important nearby anchor attraction / anchor cluster the user is currently orbiting.
+Why it matters
+Tourist behavior is usually anchor-centric, not coordinate-centric.
+A user is rarely “at 51.5007,-0.1246”
+They are:
+* “around the British Museum”
+* “near the riverfront”
+* “close to the old cathedral zone”
+This is crucial for:
+* feed relevance
+* route logic
+* progression modeling
+* “what next” sequencing
+Store as
+* nearest_anchor_id
+* nearest_anchor_distance_m
+How to calculate
+Choose nearest high-anchor entity within reasonable range.
+Recommended candidate filter
+Only consider entities with:
+* anchor_score >= 70
+OR
+* must_see_flag = 1
+SQL example
+SELECT item_id,
+       ST_Distance_Sphere(
+         ST_SRID(POINT(lng, lat), 4326),
+         ST_SRID(POINT(:user_lng, :user_lat), 4326)
+       ) AS dist_m
+FROM feed_entities
+WHERE location_id = :location_id
+  AND (anchor_score >= 70 OR must_see_flag = 1)
+  AND lat IS NOT NULL
+  AND lng IS NOT NULL
+ORDER BY dist_m ASC
+LIMIT 1;
+
+
+Better logic
+Not purely nearest — use a weighted score:
+anchor_proximity_score =
+    (anchor_score * 0.65)
+  + (proximity_score * 0.35)
+
+
+Where:
+proximity_score = max(0, 100 - (distance_m / 30))
+
+
+Cap between 0–100.
+Better formula
+nearest_anchor_candidate_score =
+    (normalized_anchor_score * 0.55)
+  + (normalized_popularity_score * 0.15)
+  + (proximity_score * 0.30)
+
+
+Then choose highest score.
+This avoids weird behavior where a tiny “must-see-ish” item 50m away beats the true city anchor 400m away.
+________________
+
+
+5.2 TRIP PROGRESS
+This answers:
+“How far into the user’s tourist journey are they?”
+This is one of the most important state families.
+________________
+
+
+FIELD 5 — anchor_coverage_percent
+Meaning
+How much of the meaningful nearby anchor landscape the user has already covered.
+Why it matters
+Without this, the feed repeats the same obvious things forever.
+This field helps the system know:
+   * Are they still in headline sightseeing mode?
+   * Have they already “done the major stuff” nearby?
+   * Should we shift to hidden gems / food / recovery / route fillers?
+________________
+
+
+What should count as “covered”?
+A nearby anchor is considered covered if the user has shown strong trip-consumption behavior for it.
+Covered event examples
+Any of these can count:
+   * detail view with dwell > 20 sec
+   * save
+   * route open
+   * navigate click
+   * booking click
+   * physical proximity ping within threshold
+   * repeat opens across sessions
+________________
+
+
+Step 1 — Define the local anchor set
+Not all city anchors — only relevant current trip anchors.
+Best candidate set:
+   * anchors within 6–8 km of user
+OR
+   * anchors in current area + adjacent areas
+OR
+   * anchors in current trip route corridor
+SQL example
+SELECT item_id
+FROM feed_entities
+WHERE location_id = :location_id
+  AND (anchor_score >= 70 OR must_see_flag = 1)
+  AND ST_Distance_Sphere(
+        ST_SRID(POINT(lng, lat), 4326),
+        ST_SRID(POINT(:user_lng, :user_lat), 4326)
+      ) <= 8000;
+
+
+________________
+
+
+Step 2 — Define coverage score per anchor
+anchor_visit_signal =
+    detail_view_weight
+  + save_weight
+  + route_open_weight
+  + navigation_weight
+  + physical_presence_weight
+
+
+Suggested weights:
+Signal
+	Weight
+	detail view
+	0.25
+	save
+	0.20
+	route open
+	0.20
+	navigate click
+	0.20
+	physical presence
+	0.40
+	Cap at 1.0.
+Example:
+covered_if anchor_visit_signal >= 0.60
+
+
+________________
+
+
+Step 3 — Compute weighted coverage
+Not all anchors should count equally.
+Big anchors should matter more.
+Formula
+anchor_coverage_percent =
+(
+  SUM(anchor_importance_weight for covered anchors)
+  /
+  SUM(anchor_importance_weight for all relevant anchors)
+) * 100
+
+
+Where
+anchor_importance_weight =
+    (anchor_score * 0.60)
+  + (popularity_score * 0.25)
+  + (editorial_priority * 0.15)
+
+
+Normalize all to 0–1 first if needed.
+________________
+
+
+SQL-style approach
+You’ll usually compute this in ETL / app logic, but conceptually:
+SELECT
+  SUM(CASE WHEN coverage_signal >= 0.60 THEN anchor_weight ELSE 0 END) /
+  NULLIF(SUM(anchor_weight), 0) * 100 AS anchor_coverage_percent
+FROM local_anchor_state
+WHERE session_id = :session_id;
+
+
+________________
+
+
+FIELD 6 — trip_stage
+Meaning
+A high-level label for where the user is in their active tourist day / local trip flow.
+Final recommended values
+arrival
+warming_up
+exploring
+peak_flow
+winding_down
+night_transition
+
+
+You originally suggested:
+      * arrival
+      * exploring
+      * winding_down
+That’s a good base, but too coarse for a strong system.
+This expanded version is much better.
+________________
+
+
+How to infer trip_stage
+Use a composite state score based on:
+      * session age
+      * local time
+      * anchor coverage
+      * distance traveled today
+      * item density already consumed
+      * energy fatigue
+Recommended formula
+trip_stage_score_arrival =
+    low(session_age_min)
+  + low(anchor_coverage_percent)
+  + low(distance_traveled_today)
+  + morning_bias
+
+
+trip_stage_score_exploring =
+    medium_high(session_age_min)
+  + medium(anchor_coverage_percent)
+  + high(movement_activity)
+  + high(content_interaction)
+
+
+trip_stage_score_peak_flow =
+    high(active_consumption_rate)
+  + medium_high(anchor_coverage_percent)
+  + high(route_coherence)
+  + medium fatigue
+
+
+trip_stage_score_winding_down =
+    high(session_age_min)
+  + high(fatigue_score)
+  + evening_bias
+  + lower mobility
+
+
+trip_stage_score_night_transition =
+    sunset_or_post_sunset
+  + food_social_bias
+  + lower cultural appetite
+
+
+Pick the highest score.
+________________
+
+
+Practical rules version
+CASE
+  WHEN local_session_age_min < 60
+       AND anchor_coverage_percent < 15
+    THEN 'arrival'
+
+
+  WHEN local_session_age_min BETWEEN 60 AND 150
+       AND anchor_coverage_percent < 35
+    THEN 'warming_up'
+
+
+  WHEN anchor_coverage_percent BETWEEN 20 AND 65
+       AND fatigue_score < 60
+    THEN 'exploring'
+
+
+  WHEN anchor_coverage_percent BETWEEN 40 AND 80
+       AND rhythm_density_score >= 60
+       AND fatigue_score BETWEEN 30 AND 70
+    THEN 'peak_flow'
+
+
+  WHEN fatigue_score >= 65
+       OR local_time >= '17:30:00'
+    THEN 'winding_down'
+
+
+  WHEN local_time >= sunset_time
+    THEN 'night_transition'
+
+
+  ELSE 'exploring'
+END
+
+
+________________
+
+
+FIELD 7 — trip_day_index
+Meaning
+Which day of the trip the user is likely on.
+Why it matters
+Day 1 behavior is very different from Day 4 behavior.
+      * Day 1 → iconic / orientation-heavy
+      * Day 2 → deep exploration
+      * Day 3+ → selective / relaxed / high-yield
+How to compute
+If you know hotel check-in/check-out → easy.
+If not, infer from:
+      * first session in location
+      * first hotel search / city search date
+      * first map interaction in city
+Formula
+trip_day_index = DATEDIFF(today_local_date, first_seen_trip_date) + 1
+
+
+SQL
+SELECT DATEDIFF(CURDATE(), MIN(DATE(event_time))) + 1 AS trip_day_index
+FROM user_session_events
+WHERE session_id = :session_id
+  AND location_id = :location_id;
+
+
+________________
+
+
+FIELD 8 — local_session_age_min
+Meaning
+How long the current local trip session has been active.
+Formula
+local_session_age_min = now - session_start_time
+
+
+Why useful
+Great for:
+      * arrival vs flow vs fatigue inference
+      * “too much too soon” prevention
+      * pacing
+SQL
+SELECT TIMESTAMPDIFF(MINUTE, MIN(event_time), NOW()) AS local_session_age_min
+FROM user_session_events
+WHERE session_id = :session_id;
+
+
+________________
+
+
+5.3 ENERGY / RHYTHM STATE
+This answers:
+“What kind of experience cadence has the user already been having?”
+This is extremely important for avoiding bad feed sequencing.
+A user who just saw:
+      * museum
+      * museum
+      * cathedral
+      * viewpoint
+…should probably not get another “serious 2-hour cultural anchor” immediately.
+________________
+
+
+FIELD 9 — last_item_type_seen
+Meaning
+The most recently strongly engaged item category.
+Suggested values
+anchor_attraction
+context_attraction
+experience
+food
+enabler
+event
+
+
+How to calculate
+Most recent item with strong engagement.
+SQL
+SELECT item_type
+FROM user_session_events
+WHERE session_id = :session_id
+  AND item_id IS NOT NULL
+  AND event_type IN ('detail_view', 'save', 'route_open', 'navigate_click')
+ORDER BY event_time DESC
+LIMIT 1;
+
+
+________________
+
+
+FIELD 10 — last_item_energy
+Meaning
+Energy intensity of the last meaningful item consumed.
+Why it matters
+This helps avoid:
+      * back-to-back heavy items
+      * recovery content too early
+      * dead feed pacing
+You should precompute an item-level field:
+feed_entities.energy_score
+
+
+Recommended scale:
+0–100
+
+
+Interpretation:
+      * 0–20 = passive / rest / scenic
+      * 21–40 = light stroll / snack / easy stop
+      * 41–60 = moderate browsing / soft experience
+      * 61–80 = active / involved / destination-heavy
+      * 81–100 = demanding / time-heavy / high-cognitive / high-effort
+Populate
+SELECT fe.energy_score
+FROM user_session_events ue
+JOIN feed_entities fe ON fe.item_id = ue.item_id
+WHERE ue.session_id = :session_id
+  AND ue.event_type IN ('detail_view', 'save', 'route_open', 'navigate_click')
+ORDER BY ue.event_time DESC
+LIMIT 1;
+
+
+________________
+
+
+FIELD 11 — current_energy_state
+Meaning
+The user’s inferred current experiential appetite.
+This is not physical biometrics.
+It is tourism rhythm appetite.
+Final recommended values
+high_momentum
+steady
+slowing
+fatigued
+recovery_ready
+
+
+This is much better than trying to guess literal energy.
+________________
+
+
+How to infer it
+Use:
+      * last 3–5 consumed item energies
+      * dwell density
+      * movement distance
+      * time of day
+      * weather discomfort
+      * stop density
+      * session age
+________________
+
+
+Step 1 — Compute rolling energy load
+recent_energy_load =
+    weighted average of last 5 item energy scores
+
+
+Suggested recency weights:
+most recent = 0.35
+2nd = 0.25
+3rd = 0.18
+4th = 0.12
+5th = 0.10
+
+
+________________
+
+
+Step 2 — Compute fatigue score
+fatigue_score =
+    (recent_energy_load * 0.35)
+  + (local_session_age_norm * 0.20)
+  + (distance_traveled_today_norm * 0.15)
+  + (heat_stress_level * 0.10)
+  + (rain_discomfort_level * 0.05)
+  + (high_dwell_density * 0.15)
+
+
+Normalize all to 0–100.
+________________
+
+
+Then map to state
+CASE
+  WHEN fatigue_score < 25 THEN 'high_momentum'
+  WHEN fatigue_score < 45 THEN 'steady'
+  WHEN fatigue_score < 65 THEN 'slowing'
+  WHEN fatigue_score < 80 THEN 'fatigued'
+  ELSE 'recovery_ready'
+END
+
+
+________________
+
+
+FIELD 12 — rhythm_density_score
+Meaning
+How “dense” or “packed” the user’s recent consumption rhythm has been.
+Why it matters
+Two users can have same anchor coverage but very different pacing:
+      * one is leisurely drifting
+      * one is doing aggressive tourist sprinting
+Formula
+rhythm_density_score =
+    (items_strongly_engaged_last_4h * 12)
+  + (avg_item_energy_last_4h * 0.45)
+  + (movement_between_items_score * 0.20)
+
+
+Cap 0–100.
+Suggested interpretation
+      * 0–25 → sparse / drifting
+      * 26–50 → casual
+      * 51–75 → active day
+      * 76–100 → overloaded sprint
+________________
+
+
+FIELD 13 — fatigue_score
+You should store this explicitly because many modules will use it.
+Formula recap
+fatigue_score =
+    (recent_energy_load * 0.35)
+  + (local_session_age_norm * 0.20)
+  + (distance_traveled_today_norm * 0.15)
+  + (heat_stress_level * 0.10)
+  + (rain_discomfort_level * 0.05)
+  + (rhythm_density_score * 0.15)
+
+
+________________
+
+
+5.4 MOVEMENT STATE
+This answers:
+“How is the user physically progressing through the city?”
+This is what prevents the feed from feeling spatially stupid.
+________________
+
+
+FIELD 14 — movement_pattern
+Meaning
+A simplified label for how the user is moving right now.
+Final recommended values
+stationary
+local_wander
+linear_progression
+hub_hopping
+zigzagging
+fast_transfer
+
+
+This is much stronger than a generic movement label.
+________________
+
+
+How to infer it
+Use the last 5–10 location pings or item engagements.
+Track:
+      * total distance moved
+      * straight-line displacement
+      * number of area changes
+      * directional variance
+      * average speed
+________________
+
+
+Key metrics
+A. Path length
+Total traveled path.
+path_length_m = sum(distance between consecutive pings)
+
+
+B. Net displacement
+Distance from first recent point to latest point.
+net_displacement_m = distance(first_ping, last_ping)
+
+
+C. Path efficiency
+path_efficiency = net_displacement_m / path_length_m
+
+
+Interpretation:
+      * close to 1 → straight progression
+      * low → wandering / zig-zag
+D. Area transition count
+How many times user switched area.
+________________
+
+
+Suggested rules
+CASE
+  WHEN path_length_m < 400 THEN 'stationary'
+  WHEN path_efficiency < 0.35 AND area_transition_count <= 1 THEN 'local_wander'
+  WHEN path_efficiency >= 0.65 AND movement_speed_kmh BETWEEN 2 AND 8 THEN 'linear_progression'
+  WHEN area_transition_count >= 2 AND path_efficiency BETWEEN 0.30 AND 0.65 THEN 'hub_hopping'
+  WHEN path_efficiency < 0.30 AND area_transition_count >= 2 THEN 'zigzagging'
+  WHEN movement_speed_kmh > 12 THEN 'fast_transfer'
+  ELSE 'local_wander'
+END
+
+
+________________
+
+
+FIELD 15 — current_directionality
+Meaning
+The dominant direction / route orientation the user seems to be moving toward.
+Why it matters
+This is critical for “what should appear next.”
+If the user is clearly moving east / toward waterfront / toward old town, the feed should bias forward, not behind them.
+Recommended output style
+You can store either:
+Option A — semantic direction
+toward_city_center
+toward_waterfront
+toward_old_town
+toward_hotel_zone
+toward_nightlife_cluster
+undirected
+
+
+Option B — geometric direction
+N / NE / E / SE / S / SW / W / NW / undirected
+
+
+Best practice
+Store both:
+      * bearing_deg
+      * current_directionality
+________________
+
+
+Formula
+Using last two or three meaningful location points:
+bearing_deg = atan2(...)
+
+
+Then convert into semantic direction by matching with area centroids or cluster vectors.
+Practical approach
+Choose nearest future-facing area / anchor that aligns with motion vector.
+Example logic
+directionality_target_score =
+    (vector_alignment * 0.60)
+  + (distance_forward_bias * 0.25)
+  + (cluster_importance * 0.15)
+
+
+Then choose best target area.
+________________
+
+
+FIELD 16 — movement_speed_kmh
+Meaning
+Recent movement velocity.
+Why it matters
+Very useful for detecting:
+      * walking exploration
+      * taxi transfer
+      * train/metro movement
+      * inactive user
+Formula
+movement_speed_kmh = recent_path_length_km / recent_time_hours
+
+
+Use a short window:
+      * last 15–25 min
+Suggested interpretation
+      * 0–1 → stopped / venue dwell
+      * 1–4 → slow stroll
+      * 4–7 → active walking
+      * 7–15 → bike / fast urban move
+      * 15+ → transit / car
+________________
+
+
+FIELD 17 — route_coherence_score
+Meaning
+How coherent and route-sensible the user’s recent movement has been.
+Why it matters
+If route coherence is already low, the feed should help repair the journey.
+Formula
+route_coherence_score =
+    (path_efficiency * 40)
+  + (forward_progression_score * 25)
+  + (low_backtrack_penalty_component * 20)
+  + (cluster_continuity_score * 15)
+
+
+Normalize to 0–100.
+Interpretation:
+      * 0–30 → chaotic
+      * 31–55 → somewhat scattered
+      * 56–75 → decent progression
+      * 76–100 → clean tourist route
+________________
+
+
+5.5 USER MODE (OPTIONAL / INFERRED)
+This should remain soft inference, never hard identity truth.
+________________
+
+
+FIELD 18 — group_mode
+Meaning
+Best current guess of travel party format.
+Suggested values
+solo
+couple
+family
+friends
+unknown
+
+
+Important note
+This should be low-confidence unless you have explicit signals.
+Good sources
+      * booking room occupancy
+      * child-related searches
+      * stroller/family attraction clicks
+      * nightlife / bar clusters / group experiences
+      * romantic dining patterns
+      * number of simultaneous device interactions (if available)
+________________
+
+
+Inference scoring example
+Family signals
+      * child attraction opens
+      * playground / aquarium / zoo engagement
+      * stroller-friendly / family restaurant clicks
+      * early evening timing
+      * lower nightlife interaction
+Couple signals
+      * scenic sunset
+      * romantic dining
+      * lower child signals
+      * moderate pace
+      * intimate experience clicks
+Friends signals
+      * nightlife
+      * bars
+      * social experiences
+      * later active hours
+      * group transport patterns
+Solo signals
+      * museum density
+      * flexible wandering
+      * long dwell on cultural items
+      * low group-oriented experiences
+________________
+
+
+Formula example
+group_mode_family_score =
+    family_item_engagement * 0.45
+  + child_related_search_signal * 0.30
+  + early_day_return_pattern * 0.10
+  + family_restaurant_bias * 0.15
+
+
+Do this for each mode and choose highest if confidence > threshold.
+Confidence rule
+if top_score < 55:
+    group_mode = 'unknown'
+
+
+That is important.
+Do not over-infer.
+________________
+
+
+FIELD 19 — likely_intent_mode
+Meaning
+What the user seems to want right now, not in general.
+This is one of the most powerful fields in the entire system.
+Final recommended values
+sightseeing
+food
+recovery
+social
+excursion
+orientation
+shopping
+scenic
+
+
+Your original list was strong:
+      * sightseeing
+      * food
+      * recovery
+      * social
+      * excursion
+I’d keep those, but add:
+      * orientation
+      * shopping
+      * scenic
+Those matter a lot in real tourist behavior.
+________________
+
+
+How to infer it
+Use weighted evidence from:
+      * last 5–10 item interactions
+      * map movement
+      * time of day
+      * fatigue
+      * weather
+      * route position
+      * search behavior
+      * current area type
+________________
+
+
+Example scoring
+Sightseeing score
+sightseeing_score =
+    attraction_engagement_rate * 0.35
+  + anchor_bias * 0.25
+  + low_food_density_recent * 0.10
+  + daytime_bias * 0.10
+  + cultural_area_bias * 0.20
+
+
+Food score
+food_score =
+    food_item_engagement_rate * 0.40
+  + meal_window_bias * 0.20
+  + fatigue_score * 0.10
+  + restaurant_area_bias * 0.15
+  + route_pause_pattern * 0.15
+
+
+Recovery score
+recovery_score =
+    fatigue_score * 0.35
+  + weather_discomfort * 0.20
+  + low-mobility pattern * 0.20
+  + recent_high_energy_load * 0.15
+  + cafe/lounge/spa bias * 0.10
+
+
+Social score
+social_score =
+    nightlife_or_bar_engagement * 0.35
+  + evening_bias * 0.20
+  + friends_group_signal * 0.15
+  + event_interest * 0.15
+  + dense_social_area_bias * 0.15
+
+
+Excursion score
+excursion_score =
+    peripheral_area_interest * 0.25
+  + transport_tolerance * 0.20
+  + saved_far_items * 0.20
+  + low_local_anchor_remaining * 0.20
+  + half_day_or_full_day_time_window * 0.15
+
+
+Orientation score
+orientation_score =
+    trip_stage_arrival_bias * 0.35
+  + map_open_rate * 0.20
+  + broad_anchor browsing * 0.20
+  + low commitment clicks * 0.15
+  + city overview area bias * 0.10
+
+
+Scenic score
+scenic_score =
+    viewpoint/walk/waterfront engagement * 0.40
+  + sunset_bias * 0.20
+  + lower indoor density * 0.15
+  + camera/photo spots bias * 0.15
+  + recovery blend * 0.10
+
+
+Shopping score
+shopping_score =
+    market/shopping street engagement * 0.40
+  + retail district proximity * 0.20
+  + moderate fatigue * 0.10
+  + food-adjacent browsing * 0.10
+  + souvenir area bias * 0.20
+
+
+Then:
+likely_intent_mode = argmax(all intent scores)
+
+
+________________
+
+
+FIELD 20 — confidence_intent_mode
+Meaning
+How confident the system is in the inferred intent.
+Formula
+confidence_intent_mode =
+    top_intent_score - second_best_intent_score
+
+
+Then scale to 0–100.
+Interpretation:
+      * <10 → weak inference
+      * 10–20 → moderate
+      * 20+ → strong
+Same should be done for:
+      * confidence_group_mode
+________________
+
+
+6) RECOMMENDED DERIVED FIELDS YOU SHOULD ALSO ADD
+These are not mandatory in your original list, but they are very worth adding because they will dramatically improve downstream quality.
+________________
+
+
+A. distance_traveled_today_m
+Why:
+Used in fatigue + excursion readiness.
+________________
+
+
+B. area_transition_count
+Why:
+Very useful for movement_pattern.
+________________
+
+
+C. recent_item_mix_vector
+Example:
+{
+  "anchor_attraction": 0.35,
+  "food": 0.25,
+  "experience": 0.20,
+  "enabler": 0.10,
+  "event": 0.10
+}
+
+
+Why:
+Excellent input into intent inference.
+________________
+
+
+D. route_repair_needed_flag
+1 if route_coherence_score < threshold
+
+
+Very useful for Route Engine.
+________________
+
+
+E. anchor_saturation_band
+low / medium / high
+
+
+Derived from anchor_coverage_percent.
+________________
+
+
+F. fresh_start_flag
+1 if session_age < 45 and anchor_coverage_percent < 10
+
+
+Very useful for feed shape.
+________________
+
+
+7) RECOMMENDED COMPUTATION PIPELINE
+This layer should ideally compute in 4 stages.
+________________
+
+
+STAGE 1 — SPATIAL SNAPSHOT
+Compute:
+      * user_lat
+      * user_lng
+      * current_area
+      * nearest_anchor
+      * nearest_anchor_distance_m
+________________
+
+
+STAGE 2 — TRIP PROGRESSION SNAPSHOT
+Compute:
+      * anchor_coverage_percent
+      * trip_day_index
+      * local_session_age_min
+      * trip_stage
+________________
+
+
+STAGE 3 — RHYTHM SNAPSHOT
+Compute:
+      * last_item_type_seen
+      * last_item_energy
+      * rhythm_density_score
+      * fatigue_score
+      * current_energy_state
+________________
+
+
+STAGE 4 — MOVEMENT + MODE SNAPSHOT
+Compute:
+      * movement_pattern
+      * current_directionality
+      * movement_speed_kmh
+      * route_coherence_score
+      * group_mode
+      * likely_intent_mode
+      * confidence scores
+________________
+
+
+8) REFRESH CADENCE
+Not every field needs same refresh rate.
+Every location ping / map move
+      * user_lat
+      * user_lng
+      * current_area
+      * nearest_anchor
+      * movement_pattern
+      * current_directionality
+      * movement_speed_kmh
+Every meaningful engagement
+      * last_item_type_seen
+      * last_item_energy
+      * rhythm_density_score
+      * fatigue_score
+      * current_energy_state
+      * likely_intent_mode
+Every 15–30 min or session recompute
+      * anchor_coverage_percent
+      * trip_stage
+      * route_coherence_score
+      * group_mode
+________________
+
+
+9) FINAL “COMPLETE VERSION” OF THE LAYER
+This is the version I’d recommend you actually use.
+________________
+
+
+FINAL USER / TRIP STATE LAYER
+9.1 Spatial State
+      * user_lat
+      * user_lng
+      * location_confidence_score
+      * current_area_id
+      * current_area
+      * current_area_confidence
+      * nearest_anchor_id
+      * nearest_anchor_distance_m
+________________
+
+
+9.2 Trip Progress
+      * anchor_coverage_percent
+      * anchor_saturation_band
+      * trip_stage
+      * trip_day_index
+      * local_session_age_min
+      * fresh_start_flag
+________________
+
+
+9.3 Energy / Rhythm State
+      * last_item_type_seen
+      * last_item_energy
+      * rhythm_density_score
+      * fatigue_score
+      * current_energy_state
+________________
+
+
+9.4 Movement State
+      * movement_pattern
+      * current_directionality
+      * bearing_deg
+      * movement_speed_kmh
+      * distance_traveled_today_m
+      * area_transition_count
+      * route_coherence_score
+      * route_repair_needed_flag
+________________
+
+
+9.5 User Mode (Soft Inference)
+      * group_mode
+      * confidence_group_mode
+      * likely_intent_mode
+      * confidence_intent_mode
+________________
+
+
+10) WHAT THIS LAYER SHOULD NOT DO
+This is important.
+This layer should not:
+      * decide ranking
+      * decide final feed slots
+      * store long-term user preference
+      * over-personalize based on identity assumptions
+      * act like a recommendation engine
+It should only answer:
+“What kind of tourist situation is this user currently in?”
+That is its job.
+________________
+
+
+11) STRONGEST PRACTICAL INSIGHT
+If you implement only five things really well, this module will already become very powerful:
+      1. current_area
+      2. nearest_anchor
+      3. anchor_coverage_percent
+      4. current_energy_state
+      5. likely_intent_mode
+Those five alone will make your feed feel dramatically smarter.

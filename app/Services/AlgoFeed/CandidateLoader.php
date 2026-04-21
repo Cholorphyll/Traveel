@@ -46,6 +46,8 @@ use Illuminate\Support\Facades\DB;
 class CandidateLoader
 {
     protected int $locationId;
+    private ?string $locationSlugId = null;
+    private array   $categoryMap    = [];
 
     // Categories considered scenic/viewpoint
     private const SCENIC_KEYWORDS   = ['viewpoint','scenic','panorama','sunset','vista','overlook','waterfront'];
@@ -59,9 +61,38 @@ class CandidateLoader
 
     public function load(): Collection
     {
-        $sights      = $this->loadSights();
+        $t0 = microtime(true);
+
+        // Pre-fetch location slugid (one query, avoids JOIN inside sight query)
+        $locRow = DB::table('Location')
+            ->where('LocationId', $this->locationId)
+            ->first(['slugid']);
+        $this->locationSlugId = $locRow->slugid ?? null;
+
+        // Pre-fetch all category titles in one query
+        $this->categoryMap = DB::table('Category')
+            ->pluck('Title', 'CategoryId')
+            ->toArray();
+
+        \Illuminate\Support\Facades\Log::info('[CandidateLoader] prefetch', [
+            'location_slugid' => $this->locationSlugId,
+            't' => round(microtime(true) - $t0, 3),
+        ]);
+
+        $t = microtime(true);
+        $sights = $this->loadSights();
+        \Illuminate\Support\Facades\Log::info('[CandidateLoader] sights', [
+            'count' => $sights->count(), 't' => round(microtime(true) - $t, 3)]);
+
+        $t = microtime(true);
         $experiences = $this->loadExperiences();
+        \Illuminate\Support\Facades\Log::info('[CandidateLoader] experiences', [
+            'count' => $experiences->count(), 't' => round(microtime(true) - $t, 3)]);
+
+        $t = microtime(true);
         $restaurants = $this->loadRestaurants();
+        \Illuminate\Support\Facades\Log::info('[CandidateLoader] restaurants', [
+            'count' => $restaurants->count(), 't' => round(microtime(true) - $t, 3)]);
 
         return $sights->merge($experiences)->merge($restaurants)->values();
     }
@@ -74,29 +105,37 @@ class CandidateLoader
             ->select(
                 's.SightId', 's.Title', 's.Latitude', 's.Longitude',
                 's.ReviewCount', 's.Averagerating', 's.tier',
-                's.Img1', 's.IsMustSee', 's.MustSee', 's.LocationId',
-                's.Slug', 's.slugid', 's.Address', 's.CategoryId',
+                's.MustSee', 's.LocationId',
+                's.Slug', 's.Address', 's.CategoryId',
                 's.MicroSummary as short_desc', 's.popularity_score',
                 's.duration', 's.WeightedRating', 's.KnownFor',
                 DB::raw("'sight' as entity_type"),
-                's.Status'
+                DB::raw("null as Img1")
             )
             ->where('s.LocationId', $this->locationId)
-            ->where('s.Status', 1)
+            ->where('s.IsActive', 1)
             ->whereNotNull('s.Latitude')
             ->whereNotNull('s.Longitude')
+            ->orderBy('s.tier', 'asc')
+            ->orderBy('s.Averagerating', 'desc')
+            ->limit(400)
             ->get();
 
-        return $rows->map(fn($r) => $this->normalizeSight($r));
+        $slugid = $this->locationSlugId;
+        return $rows->map(fn($r) => $this->normalizeSight($r, $slugid));
     }
 
-    private function normalizeSight(object $r): array
+    private function normalizeSight(object $r, ?string $locationSlugId = null): array
     {
-        $isMustSee = (bool)($r->IsMustSee ?? $r->MustSee ?? false);
+        $isMustSee = (bool)($r->MustSee ?? false);
         $tier      = (int)($r->tier ?? 4);
         $popRaw    = (float)($r->popularity_score ?? 0);
         $duration  = $this->parseDuration($r->duration ?? null);
-        $catTitle  = $this->resolveCategoryTitle($r->CategoryId ?? null);
+        $catId     = $r->CategoryId ?? null;
+        $catTitle  = $catId ? ($this->categoryMap[$catId] ?? 'Attraction') : 'Attraction';
+
+        // Inject location-level slugid (same for all sights at this location)
+        $r->slugid = $locationSlugId ?? ($r->slugid ?? null);
 
         return array_merge(
             $this->baseFields('sight', $r->SightId, $r),
@@ -188,6 +227,9 @@ class CandidateLoader
             ->where('r.IsActive', 1)
             ->whereNotNull('r.Latitude')
             ->whereNotNull('r.Longitude')
+            ->orderBy('r.Averagerating', 'desc')
+            ->orderBy('r.ReviewCount', 'desc')
+            ->limit(400)
             ->get();
 
         return $rows->map(fn($r) => $this->normalizeRestaurant($r));
@@ -243,7 +285,7 @@ class CandidateLoader
             'review_count'        => $reviews,
             'avg_rating'          => $rating,
             'tier'                => $tier,
-            'img'                 => $r->Img1 ?? null,
+            'img'                 => $r->Img1 ?? null,  // null for Sight/Restaurant (no Img1 column), set for Experience
             'slug'                => $r->Slug ?? null,
             'slugid'              => $r->slugid ?? null,
             'location_id'         => (int)($r->LocationId ?? 0),
@@ -322,11 +364,6 @@ class CandidateLoader
     private function resolveCategoryTitle(?int $categoryId): string
     {
         if (!$categoryId) return 'Attraction';
-        static $cache = [];
-        if (!isset($cache[$categoryId])) {
-            $row = DB::table('Category')->where('CategoryId', $categoryId)->value('Title');
-            $cache[$categoryId] = $row ?? 'Attraction';
-        }
-        return $cache[$categoryId];
+        return $this->categoryMap[$categoryId] ?? 'Attraction';
     }
 }

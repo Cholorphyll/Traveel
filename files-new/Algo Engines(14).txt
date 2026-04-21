@@ -1,0 +1,1521 @@
+﻿MODULE — FEED ASSEMBLY & MEMORY LAYER
+Full Implementation-Ready Spec
+________________
+
+
+11.0 PURPOSE
+What this module does
+This module assembles the final feed by applying:
+1. diversity controls
+2. exposure memory
+3. session evolution logic
+4. collection usage logic
+5. cooldowns and anti-fatigue rules
+6. final feed coherence constraints
+It answers:
+“Even if this item scores well — should it be shown right now?”
+This is a post-ranking orchestration layer.
+________________
+
+
+11.1 INPUTS TO THIS MODULE
+This layer should run after:
+* Module 1: Candidate Universe Builder
+* Module 2: Base Relevance Layer
+* Module 3: Context State Builder
+* Module 4: Opportunity Engine
+* Module 5: Action Horizon Engine
+* Module 6: Role Assignment Engine
+* Module 7: Route Engine
+* Module 8: Sequence Planner
+* Module 9: Slot Ranking Engine
+* Module 10: Moment Framing Engine
+So each candidate reaching this module should already have:
+* item identity
+* type / category / cluster
+* role
+* slot type
+* rank score
+* route score
+* opportunity score
+* framing family
+* horizon
+* anchor relation
+* district relation
+* collection metadata (if any)
+This layer then decides:
+* include / suppress / cool down / defer
+* final order
+* memory writeback
+________________
+
+
+11.2 OUTPUTS OF THIS MODULE
+This module should produce:
+A) final feed rows
+Each row = one feed card to render
+B) suppression / defer decisions
+Why candidates were held back
+C) memory updates
+What was shown, seen, skipped, engaged
+D) session state updates
+How the feed should evolve next
+________________
+
+
+11.3 CORE DESIGN PRINCIPLE
+IMPORTANT:
+This layer should not re-rank the whole world again.
+That would create instability.
+Instead, it should:
+* operate on top-ranked candidates per slot
+* apply constraints, penalties, and cooldowns
+* then choose the best valid candidate
+So conceptually:
+Sequence decides slot →
+Slot Ranking provides best candidates →
+Feed Assembly decides what is actually allowed to appear now
+
+
+That architecture is correct.
+________________
+
+
+11.4 SYSTEM OBJECTS THIS MODULE NEEDS
+We now define the exact tables and fields required.
+________________
+
+
+11.5 TABLE A — feed_session_state
+This stores the current session behavior and feed evolution state.
+CREATE TABLE feed_session_state (
+    session_id BIGINT PRIMARY KEY,
+    user_id BIGINT NULL,
+    trip_id BIGINT NULL,
+
+
+    current_anchor_id BIGINT NULL,
+    current_anchor_type VARCHAR(50) NULL,
+
+
+    current_feed_position INT DEFAULT 0,
+    cards_rendered_count INT DEFAULT 0,
+    cards_seen_count INT DEFAULT 0,
+    cards_clicked_count INT DEFAULT 0,
+    cards_saved_count INT DEFAULT 0,
+    cards_skipped_count INT DEFAULT 0,
+
+
+    current_anchor_density_score DECIMAL(8,4) DEFAULT 0,
+    current_collection_density_score DECIMAL(8,4) DEFAULT 0,
+    current_decision_confidence_score DECIMAL(8,4) DEFAULT 0,
+    current_exploration_mode_score DECIMAL(8,4) DEFAULT 0,
+    current_fatigue_score DECIMAL(8,4) DEFAULT 0,
+
+
+    last_feed_refresh_at DATETIME NULL,
+    created_at DATETIME,
+    updated_at DATETIME
+);
+
+
+________________
+
+
+FIELD-BY-FIELD EXPLANATION
+________________
+
+
+session_id
+Unique session instance.
+Use:
+* one app open session
+* or one rolling session window (e.g. 4–8 hours)
+________________
+
+
+user_id
+Nullable if anonymous.
+________________
+
+
+trip_id
+If feed is trip-aware.
+________________
+
+
+current_anchor_id, current_anchor_type
+Tracks what anchor the feed is currently orbiting around.
+Examples:
+* Colosseum
+* Amalfi Coast
+* “Old Town”
+* “Beach Day”
+Used to prevent chaotic anchor jumping.
+________________
+
+
+current_feed_position
+The current logical position in feed sequence.
+Example:
+* card 1
+* card 8
+* card 22
+Used for:
+* early feed vs mid feed vs late feed behavior
+________________
+
+
+cards_rendered_count
+How many cards system has sent to UI.
+________________
+
+
+cards_seen_count
+How many cards user likely saw.
+Can be estimated via scroll visibility.
+________________
+
+
+cards_clicked_count
+How many cards user actively opened.
+________________
+
+
+cards_saved_count
+How many user saved / wishlisted.
+________________
+
+
+cards_skipped_count
+How many user rapidly passed without engagement.
+________________
+
+
+Derived Behavioral State Fields
+These are critical.
+________________
+
+
+current_anchor_density_score
+Meaning:
+How concentrated the recent feed has been around anchors / major destination items.
+High value means:
+* feed is very anchor-heavy
+* maybe too intense / too “big”
+Low value means:
+* feed may need stronger directional structure
+________________
+
+
+How to calculate
+Use recent visible cards window (e.g. last 12 shown cards):
+anchor_density =
+SUM(CASE WHEN role IN ('CURRENT_ANCHOR','NEXT_ANCHOR','COMPOSITE_ANCHOR','COLLECTIVE_DESTINATION') THEN 1 ELSE 0 END)
+/ COUNT(*)
+
+
+Weighted version:
+anchor_density =
+SUM(CASE 
+    WHEN role = 'CURRENT_ANCHOR' THEN 1.0
+    WHEN role = 'NEXT_ANCHOR' THEN 0.9
+    WHEN role = 'COMPOSITE_ANCHOR' THEN 0.8
+    WHEN role = 'COLLECTIVE_DESTINATION' THEN 0.7
+    ELSE 0
+END)
+/ COUNT(*)
+
+
+Recommended:
+Store as 0–1.
+________________
+
+
+current_collection_density_score
+Meaning:
+How many lightweight multi-option collections were recently shown.
+High value means:
+* too many “pick one of these” cards
+* feed may feel indecisive or listy
+Formula:
+collection_density =
+SUM(CASE WHEN is_collection = 1 THEN 1 ELSE 0 END) / COUNT(*)
+
+
+Weighted:
+* dinner choices = 1.0
+* lunch set = 0.8
+* nightlife cluster = 1.0
+* coffee break = 0.6
+________________
+
+
+current_decision_confidence_score
+Meaning:
+How strongly the feed is currently behaving like it “knows what you should do.”
+High means:
+* more assertive
+* more anchor / hero / must-do items
+Low means:
+* more exploratory
+* softer recommendation style
+This should be based on recent shown items.
+Formula:
+decision_confidence =
+AVG(
+    0.35 * anchor_strength_score +
+    0.25 * moment_assertiveness_score +
+    0.20 * opportunity_strength_score +
+    0.20 * slot_confidence_score
+)
+
+
+From recent 10–15 cards.
+Normalize to 0–1.
+________________
+
+
+current_exploration_mode_score
+Meaning:
+How exploratory / open-ended the current feed has become.
+High means:
+* browsing mode
+* idea mode
+* serendipity mode
+Low means:
+* structured itinerary mode
+* directional feed mode
+Formula:
+exploration_mode =
+AVG(
+    0.40 * exploration_role_flag +
+    0.20 * low_anchor_dependence +
+    0.20 * category_novelty_score +
+    0.20 * collection_usage_score
+)
+
+
+Can also be increased by user behavior:
+* many saves
+* many taps on alternatives
+* many side-clicks
+________________
+
+
+current_fatigue_score
+Meaning:
+Whether the user likely needs lighter / more varied / less demanding content.
+This is very important.
+High fatigue can happen when:
+* too many heavy items
+* too many long walks
+* too many museums
+* too much decision friction
+* low engagement across recent feed
+Recommended formula:
+fatigue_score =
+0.30 * low_engagement_penalty +
+0.20 * heavy_item_density +
+0.20 * walking_load_density +
+0.15 * anchor_density +
+0.15 * collection_overload
+
+
+Where:
+low_engagement_penalty = 1 - recent_engagement_rate
+
+
+And:
+recent_engagement_rate =
+(clicked + saved + expanded) / seen
+
+
+________________
+
+
+11.6 TABLE B — feed_exposure_memory
+This is the most important table in this module.
+It tracks what has already been shown / seen / engaged with.
+CREATE TABLE feed_exposure_memory (
+    exposure_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id BIGINT NOT NULL,
+    user_id BIGINT NULL,
+    trip_id BIGINT NULL,
+
+
+    item_id BIGINT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+
+
+    slot_type VARCHAR(100) NULL,
+    assigned_role VARCHAR(100) NULL,
+    moment_family VARCHAR(100) NULL,
+
+
+    anchor_id BIGINT NULL,
+    district_id BIGINT NULL,
+    cluster_id BIGINT NULL,
+    collection_id BIGINT NULL,
+
+
+    shown_rank_position INT NULL,
+    was_rendered TINYINT(1) DEFAULT 0,
+    was_seen TINYINT(1) DEFAULT 0,
+    was_clicked TINYINT(1) DEFAULT 0,
+    was_saved TINYINT(1) DEFAULT 0,
+    was_dismissed TINYINT(1) DEFAULT 0,
+    was_skipped_fast TINYINT(1) DEFAULT 0,
+
+
+    shown_at DATETIME NOT NULL,
+    seen_at DATETIME NULL,
+    clicked_at DATETIME NULL,
+    saved_at DATETIME NULL,
+    dismissed_at DATETIME NULL,
+
+
+    created_at DATETIME,
+    updated_at DATETIME,
+
+
+    INDEX idx_session_item (session_id, item_id, item_type),
+    INDEX idx_session_anchor (session_id, anchor_id),
+    INDEX idx_session_district (session_id, district_id),
+    INDEX idx_session_cluster (session_id, cluster_id),
+    INDEX idx_session_collection (session_id, collection_id)
+);
+
+
+________________
+
+
+11.7 WHAT THIS TABLE ENABLES
+This table allows you to penalize or suppress:
+* same item again
+* same anchor again
+* same district again
+* same collection again
+* same moment framing again
+* same cluster again
+* same role pattern again
+This is the heart of feed freshness.
+________________
+
+
+11.8 DERIVED MEMORY FEATURES FOR EACH CANDIDATE
+Every candidate entering final assembly should get memory features attached.
+You can compute these in a materialized feature table or via SQL CTEs.
+________________
+
+
+11.9 TABLE C — feed_candidate_memory_features
+CREATE TABLE feed_candidate_memory_features (
+    session_id BIGINT NOT NULL,
+    item_id BIGINT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+
+
+    item_recently_shown_count INT DEFAULT 0,
+    item_recently_seen_count INT DEFAULT 0,
+    item_recently_clicked_count INT DEFAULT 0,
+    item_recently_saved_count INT DEFAULT 0,
+
+
+    same_anchor_recent_count INT DEFAULT 0,
+    same_district_recent_count INT DEFAULT 0,
+    same_cluster_recent_count INT DEFAULT 0,
+    same_collection_recent_count INT DEFAULT 0,
+    same_moment_family_recent_count INT DEFAULT 0,
+    same_role_recent_count INT DEFAULT 0,
+    same_category_recent_count INT DEFAULT 0,
+    same_vibe_recent_count INT DEFAULT 0,
+
+
+    last_shown_minutes_ago INT NULL,
+    last_anchor_shown_minutes_ago INT NULL,
+    last_district_shown_minutes_ago INT NULL,
+    last_collection_shown_minutes_ago INT NULL,
+
+
+    novelty_score DECIMAL(8,4) DEFAULT 0,
+    repetition_risk_score DECIMAL(8,4) DEFAULT 0,
+    cooldown_penalty_score DECIMAL(8,4) DEFAULT 0,
+    fatigue_compatibility_score DECIMAL(8,4) DEFAULT 0,
+
+
+    PRIMARY KEY (session_id, item_id, item_type)
+);
+
+
+________________
+
+
+11.10 HOW TO CALCULATE EACH FIELD
+Now we’ll make this fully implementation-ready.
+________________
+
+
+A) Item-level repetition fields
+________________
+
+
+item_recently_shown_count
+How many times exact item shown in recent window.
+SELECT COUNT(*)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND item_id = :item_id
+  AND item_type = :item_type
+  AND shown_at >= NOW() - INTERVAL 24 HOUR;
+
+
+Recommended windows:
+* session window
+* 24h
+* 7d (optional persistent memory)
+________________
+
+
+item_recently_seen_count
+SELECT COUNT(*)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND item_id = :item_id
+  AND item_type = :item_type
+  AND was_seen = 1;
+
+
+________________
+
+
+item_recently_clicked_count
+SELECT COUNT(*)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND item_id = :item_id
+  AND item_type = :item_type
+  AND was_clicked = 1;
+
+
+________________
+
+
+item_recently_saved_count
+SELECT COUNT(*)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND item_id = :item_id
+  AND item_type = :item_type
+  AND was_saved = 1;
+
+
+________________
+
+
+B) Structural repetition fields
+These are far more important than item dedupe.
+Because the user usually doesn’t think:
+“Why did I see item 104 again?”
+They think:
+“Why am I seeing the same kind of thing again?”
+That means structural repetition matters more.
+________________
+
+
+same_anchor_recent_count
+How many recent shown cards belong to same anchor.
+SELECT COUNT(*)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND anchor_id = :anchor_id
+  AND shown_at >= NOW() - INTERVAL 6 HOUR;
+
+
+Better: last N cards window.
+SELECT COUNT(*)
+FROM (
+    SELECT anchor_id
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 12
+) x
+WHERE x.anchor_id = :anchor_id;
+
+
+This is more behaviorally correct than raw time.
+________________
+
+
+same_district_recent_count
+SELECT COUNT(*)
+FROM (
+    SELECT district_id
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 12
+) x
+WHERE x.district_id = :district_id;
+
+
+________________
+
+
+same_cluster_recent_count
+Examples:
+* “beach sunset drinks”
+* “old town museums”
+* “rooftop nightlife”
+SELECT COUNT(*)
+FROM (
+    SELECT cluster_id
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 12
+) x
+WHERE x.cluster_id = :cluster_id;
+
+
+________________
+
+
+same_collection_recent_count
+This matters for small choice-set cards.
+SELECT COUNT(*)
+FROM (
+    SELECT collection_id
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 15
+) x
+WHERE x.collection_id = :collection_id;
+
+
+________________
+
+
+same_moment_family_recent_count
+Examples:
+* “Right here right now”
+* “Worth crossing town for”
+* “Good backup if crowded”
+* “Nice before sunset”
+SELECT COUNT(*)
+FROM (
+    SELECT moment_family
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 10
+) x
+WHERE x.moment_family = :moment_family;
+
+
+This is very important for UX freshness.
+Because even if items differ, repeated framing language makes the feed feel fake.
+________________
+
+
+same_role_recent_count
+Examples:
+* too many NEXT_ANCHOR
+* too many RECOVERY_STOP
+* too many CHOICE_SET
+SELECT COUNT(*)
+FROM (
+    SELECT assigned_role
+    FROM feed_exposure_memory
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 10
+) x
+WHERE x.assigned_role = :assigned_role;
+
+
+________________
+
+
+same_category_recent_count
+Examples:
+* museums
+* tapas bars
+* beaches
+* churches
+* rooftop bars
+Requires category normalization upstream.
+SELECT COUNT(*)
+FROM (
+    SELECT primary_category_id
+    FROM feed_recent_cards_view
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 12
+) x
+WHERE x.primary_category_id = :primary_category_id;
+
+
+________________
+
+
+same_vibe_recent_count
+This is extremely useful and often missing in travel systems.
+Examples of vibe clusters:
+* quiet scenic
+* high-energy nightlife
+* romantic view
+* cultural heavyweight
+* casual local food
+* photogenic stroll
+If you don’t model vibe, the feed will still feel repetitive even if categories differ.
+SELECT COUNT(*)
+FROM (
+    SELECT vibe_cluster_id
+    FROM feed_recent_cards_view
+    WHERE session_id = :session_id
+    ORDER BY shown_at DESC
+    LIMIT 12
+) x
+WHERE x.vibe_cluster_id = :vibe_cluster_id;
+
+
+________________
+
+
+11.11 RECENCY GAP FIELDS
+These are cooldown helpers.
+________________
+
+
+last_shown_minutes_ago
+SELECT TIMESTAMPDIFF(
+    MINUTE,
+    MAX(shown_at),
+    NOW()
+)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND item_id = :item_id
+  AND item_type = :item_type;
+
+
+________________
+
+
+last_anchor_shown_minutes_ago
+SELECT TIMESTAMPDIFF(
+    MINUTE,
+    MAX(shown_at),
+    NOW()
+)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND anchor_id = :anchor_id;
+
+
+________________
+
+
+last_district_shown_minutes_ago
+SELECT TIMESTAMPDIFF(
+    MINUTE,
+    MAX(shown_at),
+    NOW()
+)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND district_id = :district_id;
+
+
+________________
+
+
+last_collection_shown_minutes_ago
+SELECT TIMESTAMPDIFF(
+    MINUTE,
+    MAX(shown_at),
+    NOW()
+)
+FROM feed_exposure_memory
+WHERE session_id = :session_id
+  AND collection_id = :collection_id;
+
+
+________________
+
+
+11.12 CORE DERIVED SCORES
+Now the most important part:
+the actual decision-making scores.
+________________
+
+
+11.13 novelty_score
+Meaning:
+How fresh this candidate feels relative to recent feed memory.
+This should reward:
+* unseen items
+* new districts
+* new vibes
+* new framing families
+* new role rhythm
+Recommended formula
+novelty_score =
+0.20 * item_novelty
++ 0.20 * district_novelty
++ 0.15 * anchor_novelty
++ 0.15 * category_novelty
++ 0.10 * vibe_novelty
++ 0.10 * moment_novelty
++ 0.10 * role_novelty
+
+
+Where each novelty component can be:
+novelty = 1 / (1 + recent_count)
+
+
+Examples:
+* count = 0 → 1.00
+* count = 1 → 0.50
+* count = 2 → 0.33
+* count = 4 → 0.20
+This is simple and robust.
+________________
+
+
+11.14 repetition_risk_score
+Meaning:
+Probability this will feel repetitive if shown now.
+This should be a stronger “UX fatigue risk” score than simple novelty.
+Recommended formula
+repetition_risk_score =
+0.20 * same_anchor_recent_count_norm
++ 0.20 * same_category_recent_count_norm
++ 0.15 * same_vibe_recent_count_norm
++ 0.15 * same_moment_family_recent_count_norm
++ 0.10 * same_role_recent_count_norm
++ 0.10 * same_collection_recent_count_norm
++ 0.10 * same_cluster_recent_count_norm
+
+
+Normalize counts like:
+norm_count = MIN(recent_count / threshold, 1.0)
+
+
+Example thresholds:
+* anchor: 3
+* category: 3
+* vibe: 3
+* moment family: 2
+* role: 2
+* collection: 2
+* cluster: 2
+________________
+
+
+11.15 cooldown_penalty_score
+Meaning:
+Short-term penalty for something shown too recently.
+This should decay over time.
+Recommended formula
+For each cooldown-sensitive dimension:
+cooldown_component = EXP(-minutes_since_last / cooldown_window)
+
+
+Examples:
+* just shown → near 1
+* shown long ago → near 0
+Then:
+cooldown_penalty_score =
+0.40 * item_cooldown
++ 0.25 * anchor_cooldown
++ 0.15 * district_cooldown
++ 0.10 * collection_cooldown
++ 0.10 * cluster_cooldown
+
+
+Recommended cooldown windows:
+* exact item: 180 min
+* anchor: 60–90 min
+* district: 45 min
+* collection: 90 min
+* cluster: 60 min
+________________
+
+
+11.16 fatigue_compatibility_score
+Meaning:
+How suitable this candidate is for the user’s likely current energy / attention state.
+This is very powerful.
+If fatigue is high, the system should prefer:
+* easy wins
+* nearby things
+* simple choices
+* scenic recovery
+* food / coffee / low-friction items
+If fatigue is low, it can still push:
+* major museums
+* route transitions
+* high-effort must-dos
+Required item-level features upstream
+Each candidate should already have:
+* effort_load_score
+* decision_friction_score
+* walking_cost_score
+* cognitive_weight_score
+* energy_intensity_score
+Then:
+fatigue_compatibility_score =
+1 - (
+    0.25 * effort_load_score +
+    0.20 * decision_friction_score +
+    0.20 * walking_cost_score +
+    0.20 * cognitive_weight_score +
+    0.15 * energy_intensity_score
+)
+
+
+Then adjust by current fatigue state:
+adjusted_fatigue_fit =
+1 - ABS(fatigue_compatibility_score - (1 - current_fatigue_score))
+
+
+This makes:
+* light items better when user is fatigued
+* stronger items okay when user is fresh
+Very useful.
+________________
+
+
+11.17 FINAL ASSEMBLY DECISION TABLE
+Now we need a table to store candidate-level final assembly decisions.
+________________
+
+
+TABLE D — feed_assembly_decisions
+CREATE TABLE feed_assembly_decisions (
+    decision_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id BIGINT NOT NULL,
+    item_id BIGINT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+
+
+    slot_type VARCHAR(100) NOT NULL,
+    candidate_rank INT NULL,
+
+
+    base_slot_score DECIMAL(10,4) DEFAULT 0,
+    novelty_score DECIMAL(10,4) DEFAULT 0,
+    repetition_risk_score DECIMAL(10,4) DEFAULT 0,
+    cooldown_penalty_score DECIMAL(10,4) DEFAULT 0,
+    fatigue_compatibility_score DECIMAL(10,4) DEFAULT 0,
+
+
+    diversity_bonus_score DECIMAL(10,4) DEFAULT 0,
+    session_fit_score DECIMAL(10,4) DEFAULT 0,
+    collection_suitability_score DECIMAL(10,4) DEFAULT 0,
+
+
+    final_assembly_score DECIMAL(10,4) DEFAULT 0,
+
+
+    is_suppressed TINYINT(1) DEFAULT 0,
+    suppression_reason VARCHAR(255) NULL,
+    is_selected TINYINT(1) DEFAULT 0,
+
+
+    created_at DATETIME,
+    updated_at DATETIME,
+
+
+    INDEX idx_session_slot (session_id, slot_type),
+    INDEX idx_session_selected (session_id, is_selected)
+);
+
+
+________________
+
+
+11.18 NEW SCORE: diversity_bonus_score
+Meaning:
+Reward for improving local feed variety.
+This is not just anti-repeat.
+It is positive diversity shaping.
+A candidate should get bonus if it adds variety across:
+* category
+* vibe
+* district
+* role
+* movement style
+* cognitive weight
+Formula
+diversity_bonus_score =
+0.25 * category_diversity_bonus
++ 0.20 * vibe_diversity_bonus
++ 0.15 * district_diversity_bonus
++ 0.15 * role_diversity_bonus
++ 0.15 * effort_diversity_bonus
++ 0.10 * framing_diversity_bonus
+
+
+Where each bonus is higher if recent cards lacked that property.
+Example:
+category_diversity_bonus = 1 if category not seen in last 6 cards else 0
+vibe_diversity_bonus = 1 if vibe not seen in last 5 cards else 0
+district_diversity_bonus = 1 if district not seen in last 4 cards else 0
+
+
+You can soften with:
+* 1.0 unseen
+* 0.5 lightly seen
+* 0.0 saturated
+________________
+
+
+11.19 NEW SCORE: session_fit_score
+Meaning:
+How well this candidate matches the feed’s current behavioral state.
+This should combine:
+* anchor density need
+* exploration need
+* fatigue state
+* confidence state
+* progression state
+Formula
+session_fit_score =
+0.25 * anchor_density_fit
++ 0.20 * exploration_fit
++ 0.20 * fatigue_fit
++ 0.20 * confidence_fit
++ 0.15 * progression_fit
+
+
+________________
+
+
+How to calculate subcomponents
+anchor_density_fit
+If feed is too loose, anchor-like items get bonus.
+If too anchor-heavy, anchor-like items get penalty.
+anchor_density_fit =
+1 - ABS(candidate_anchor_strength - desired_anchor_density_target)
+
+
+Where:
+desired_anchor_density_target =
+CASE
+  WHEN current_feed_position <= 5 THEN 0.70
+  WHEN current_feed_position <= 15 THEN 0.50
+  ELSE 0.35
+END
+
+
+This is excellent because early feed should be more directional.
+________________
+
+
+exploration_fit
+exploration_fit =
+1 - ABS(candidate_exploration_score - current_exploration_mode_score)
+
+
+________________
+
+
+fatigue_fit
+Use adjusted fatigue fit from earlier.
+________________
+
+
+confidence_fit
+If feed is in decisive mode, candidates with stronger clarity / lower ambiguity score better.
+confidence_fit =
+1 - ABS(candidate_decision_assertiveness - current_decision_confidence_score)
+
+
+________________
+
+
+progression_fit
+Does this candidate make sense at this point in the session?
+Examples:
+* early session: hero anchors okay
+* mid session: transitions and complements okay
+* late session: food, rest, scenic, closure, nightlife okay
+This should be driven by:
+* slot type
+* horizon
+* time of day
+* current anchor progression stage
+________________
+
+
+11.20 NEW SCORE: collection_suitability_score
+This is specifically for your v4 collection logic.
+Meaning:
+Whether a collection card is appropriate to show right now.
+This should only matter when candidate is a collection.
+________________
+
+
+Required collection-level metadata
+Each collection should have:
+* collection_type
+* collection_size
+* collection_decision_weight
+* collection_time_sensitivity
+* collection_context_fit_score
+Examples:
+* lunch set → time-sensitive, lightweight, useful
+* nightlife options → useful later, but can overload if too early
+* dinner shortlist → good if nearing evening and user needs a choice
+* coffee break cluster → good during fatigue or transition
+________________
+
+
+Recommended formula
+collection_suitability_score =
+0.30 * collection_context_fit_score
++ 0.20 * collection_time_fit
++ 0.20 * collection_lightness_score
++ 0.15 * collection_novelty
++ 0.15 * collection_non_overuse_score
+
+
+Where:
+collection_non_overuse_score = 1 / (1 + same_collection_recent_count)
+
+
+And:
+collection_lightness_score = 1 - collection_decision_weight
+
+
+This is very important:
+small collections should feel like helpful assistance, not indecision.
+________________
+
+
+11.21 FINAL ASSEMBLY SCORE
+This is the final decision score used to select the actual card.
+Recommended formula
+final_assembly_score =
+0.45 * base_slot_score
++ 0.15 * novelty_score
++ 0.10 * diversity_bonus_score
++ 0.10 * session_fit_score
++ 0.10 * fatigue_compatibility_score
++ 0.10 * collection_suitability_score
+- 0.15 * repetition_risk_score
+- 0.15 * cooldown_penalty_score
+
+
+Clamp to 0–1 or keep raw weighted score.
+________________
+
+
+11.22 HARD SUPPRESSION RULES
+Before selecting highest score, apply hard guards.
+These are extremely important.
+________________
+
+
+Suppress if exact item shown too recently
+IF last_shown_minutes_ago < 90 THEN suppress
+
+
+Unless:
+* item was clicked/saved strongly
+* item is truly critical (e.g. anchor of day)
+________________
+
+
+Suppress if same moment family overused
+IF same_moment_family_recent_count >= 3 THEN suppress
+
+
+Because the feed will sound repetitive.
+________________
+
+
+Suppress if collection overload
+IF current_collection_density_score > 0.35
+AND candidate.is_collection = 1
+THEN suppress
+
+
+________________
+
+
+Suppress if same category saturation
+IF same_category_recent_count >= 4 THEN suppress
+
+
+Example:
+4 museums in last 8 cards = bad feed.
+________________
+
+
+Suppress if anchor oversaturation
+IF same_anchor_recent_count >= 5
+AND candidate.role IN ('CURRENT_ANCHOR','NEXT_ANCHOR')
+THEN suppress
+
+
+Unless:
+* anchor is highly dominant and still unresolved
+________________
+
+
+Suppress if low fatigue fit and fatigue high
+IF current_fatigue_score > 0.75
+AND fatigue_compatibility_score < 0.30
+THEN suppress
+
+
+This is extremely useful.
+________________
+
+
+11.23 FINAL SELECTION ALGORITHM
+Now the actual runtime logic.
+________________
+
+
+Feed Assembly Runtime Logic
+For each next feed slot:
+Step 1 — Get top ranked candidates from Module 9
+Example:
+* top 20 for slot
+Step 2 — Attach memory features
+Join from feed_candidate_memory_features
+Step 3 — Compute assembly scores
+Compute:
+* novelty
+* repetition
+* cooldown
+* diversity
+* fatigue fit
+* session fit
+* collection suitability
+Step 4 — Apply hard suppression rules
+Mark candidates invalid
+Step 5 — Select highest valid final_assembly_score
+Step 6 — Write selected row to feed output
+Store in final feed table
+Step 7 — Write exposure memory
+Once rendered / seen / clicked
+Step 8 — Update session state
+Recalculate feed density and fatigue state
+________________
+
+
+11.24 TABLE E — feed_rendered_output
+CREATE TABLE feed_rendered_output (
+    rendered_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id BIGINT NOT NULL,
+    user_id BIGINT NULL,
+    trip_id BIGINT NULL,
+
+
+    feed_position INT NOT NULL,
+
+
+    item_id BIGINT NOT NULL,
+    item_type VARCHAR(50) NOT NULL,
+
+
+    slot_type VARCHAR(100) NOT NULL,
+    assigned_role VARCHAR(100) NULL,
+    moment_family VARCHAR(100) NULL,
+
+
+    anchor_id BIGINT NULL,
+    district_id BIGINT NULL,
+    cluster_id BIGINT NULL,
+    collection_id BIGINT NULL,
+
+
+    final_assembly_score DECIMAL(10,4) DEFAULT 0,
+    was_rendered TINYINT(1) DEFAULT 0,
+    was_seen TINYINT(1) DEFAULT 0,
+    was_clicked TINYINT(1) DEFAULT 0,
+    was_saved TINYINT(1) DEFAULT 0,
+
+
+    rendered_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+
+
+    INDEX idx_session_position (session_id, feed_position)
+);
+
+
+________________
+
+
+11.25 SESSION EVOLUTION LOGIC
+Now one of the most important parts:
+how the feed changes over scroll.
+This is what makes it feel alive.
+________________
+
+
+11.26 FEED PHASES
+You should explicitly model feed phases.
+________________
+
+
+Phase A — Orientation Phase
+Usually first 3–6 cards
+Purpose:
+* establish trust
+* show strong anchors
+* orient the user
+* make the destination feel “understood”
+Preferred:
+* hero items
+* high-confidence anchors
+* strong “worth it” moments
+Avoid:
+* too many small collections
+* too many weak alternates
+* too much randomness
+________________
+
+
+Phase B — Expansion Phase
+Usually cards 6–15
+Purpose:
+* broaden options
+* build route shape
+* insert smart complements
+* add flexibility
+Preferred:
+* secondary anchors
+* transitions
+* choice sets
+* scenic detours
+* context-aware food
+________________
+
+
+Phase C — Adaptive Phase
+Usually cards 15+
+Purpose:
+* become more behavior-sensitive
+* diversify more
+* reward curiosity
+* reduce repetition tolerance
+Preferred:
+* more novelty
+* more personal patterning
+* more fatigue adaptation
+* more recovery and optionality
+________________
+
+
+11.27 HOW TO IMPLEMENT FEED PHASES
+Add a derived field:
+feed_phase
+
+
+Logic:
+CASE
+  WHEN current_feed_position <= 5 THEN 'ORIENTATION'
+  WHEN current_feed_position <= 15 THEN 'EXPANSION'
+  ELSE 'ADAPTIVE'
+END
+
+
+Then use it in scoring weights.
+Example:
+In Orientation
+* base score weight ↑
+* novelty weight ↓
+* collections ↓
+In Adaptive
+* novelty ↑
+* diversity ↑
+* fatigue fit ↑
+* collection fit ↑
+This is very important.
+________________
+
+
+11.28 MEMORY WRITEBACK RULES
+After rendering / viewing / clicking, memory must be updated properly.
+________________
+
+
+On render
+Write:
+* item
+* role
+* anchor
+* district
+* cluster
+* collection
+* framing family
+________________
+
+
+On seen
+Set:
+* was_seen = 1
+* seen_at = NOW()
+________________
+
+
+On click
+Set:
+* was_clicked = 1
+* clicked_at = NOW()
+________________
+
+
+On save
+Set:
+* was_saved = 1
+* saved_at = NOW()
+________________
+
+
+On rapid skip
+Set:
+* was_skipped_fast = 1
+This is very valuable.
+Because a “shown but ignored” item should not be treated same as “shown and engaged.”
+________________
+
+
+11.29 MEMORY SHOULD BE MULTI-HORIZON
+This is a very strong design improvement.
+You should track repetition in 3 horizons:
+________________
+
+
+A) Immediate Memory
+Current session / last 10–15 cards
+Used for:
+* local repetition
+* back-to-back freshness
+________________
+
+
+B) Short-Term Memory
+Last 24–72 hours
+Used for:
+* revisit freshness
+* not showing same “hero picks” every app open
+________________
+
+
+C) Persistent Preference Memory
+Longer term
+Used for:
+* category affinity
+* vibe preference
+* role preference
+* exploration style
+This is not the same as exposure memory.
+Don’t confuse them.
+Exposure memory = anti-repeat
+Preference memory = personalization
+Both should exist.
+________________
+
+
+11.30 OPTIONAL TABLE — feed_user_preference_memory
+CREATE TABLE feed_user_preference_memory (
+    user_id BIGINT PRIMARY KEY,
+
+
+    museum_affinity_score DECIMAL(8,4) DEFAULT 0,
+    food_affinity_score DECIMAL(8,4) DEFAULT 0,
+    nightlife_affinity_score DECIMAL(8,4) DEFAULT 0,
+    scenic_affinity_score DECIMAL(8,4) DEFAULT 0,
+    local_discovery_affinity_score DECIMAL(8,4) DEFAULT 0,
+    anchor_preference_score DECIMAL(8,4) DEFAULT 0,
+    exploration_preference_score DECIMAL(8,4) DEFAULT 0,
+    collection_tolerance_score DECIMAL(8,4) DEFAULT 0,
+
+
+    updated_at DATETIME
+);
+
+
+This should influence:
+* not what gets repeated,
+but
+* what gets gently preferred.
+________________
+
+
+11.31 FINAL ARCHITECTURE SUMMARY
+This module should contain 4 sub-engines:
+________________
+
+
+A) Diversity Engine
+Controls local variety:
+   * category
+   * vibe
+   * district
+   * role
+   * framing
+________________
+
+
+B) Exposure Memory Engine
+Controls repetition:
+   * item
+   * anchor
+   * cluster
+   * collection
+   * moment family
+   * district
+________________
+
+
+C) Session Evolution Engine
+Controls adaptation across scroll:
+   * orientation
+   * expansion
+   * adaptive
+   * fatigue / confidence / exploration state
+________________
+
+
+D) Collection Governance Engine
+Controls when small collections should appear:
+   * not too often
+   * not too early
+   * not too heavy
+   * only when useful
+________________
+
+
+11.32 MOST IMPORTANT IMPLEMENTATION PRINCIPLE
+If you only remember one thing from this module, it should be this:
+The feed should not merely show the best items.
+It should show the best next experience that still feels fresh.
+That is the actual job of feed assembly.
+And that is exactly what this module does.
+________________
+
+
+If you want, I can now do the true final engineering version of this as:
+“MODULE 11 — Full SQL / Computation / Runtime Spec”
+with:
+   * exact table dependencies
+   * exact candidate feature pipeline
+   * exact materialized views
+   * exact batch jobs
+   * exact online scoring logic
+   * exact per-slot assembly pseudocode
+   * and a production-ready end-to-end architecture
+That would be the final system design version you could actually hand to engineering.

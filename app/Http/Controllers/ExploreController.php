@@ -1047,6 +1047,7 @@ class ExploreController extends Controller
                 }
 
                 // ── Run AlgoFeedEngine (14-module pipeline) ───────────────────
+                ini_set('memory_limit', '512M');
                 $feedStartedAt = microtime(true);
                 $algoEngine    = new AlgoFeedEngine($locationID, $algoContext);
                 $algoResult    = $algoEngine->generate();
@@ -1062,14 +1063,114 @@ class ExploreController extends Controller
                     ]);
                 }
 
-                // ── Store structured feed for view ────────────────────────────
-                $structuredFeed = $feedData;
-
-                // ── Convert to flat list for view backward-compatibility ───────
+                // ── Transform composed feed into blade-expected format ──────────
+                $structuredFeed = [];
                 $optimizedItinerary = [];
+                $stepOrder = 1;
+
                 foreach ($feedData as $card) {
-                    if (($card['type'] ?? '') === 'transit') continue;
-                    // Map new card shape to legacy object shape expected by view
+                    if (($card['type'] ?? '') === 'transit') {
+                        $structuredFeed[] = $card;
+                        continue;
+                    }
+
+                    // Map entity_type to blade-expected type names
+                    $bladeType = match ($card['entity_type'] ?? $card['type'] ?? 'sight') {
+                        'sight'       => 'attraction',
+                        'restaurant'  => 'restaurant',
+                        'experience'  => 'experience',
+                        default       => 'attraction',
+                    };
+
+                    // Determine display_type from card layout
+                    $cardLayout   = $card['layout'] ?? 'LARGE';
+                    $displayType  = in_array($cardLayout, ['LARGE', 'LARGE_WITH_HORIZONTAL_SCROLL', 'MULTI_SECTION']) ? 'card_large' : 'card_small';
+
+                    // Build the data sub-object the blade expects
+                    $dataObject = [
+                        'id'                 => $card['entity_id']   ?? null,
+                        'title'              => $card['title']       ?? '',
+                        'latitude'           => $card['lat']         ?? null,
+                        'longitude'          => $card['lng']         ?? null,
+                        'rating'             => $card['rating']      ?? null,
+                        'review_count'       => $card['review_count'] ?? 0,
+                        'category_title'     => $card['category']    ?? null,
+                        'slug'               => $card['slug']        ?? null,
+                        'slugid'             => $card['slugid']      ?? null,
+                        'image'              => $card['image']       ?? null,
+                        'short_description'  => $card['short_description'] ?? null,
+                        'tier'               => $card['tier']        ?? 4,
+                        'cuisines'           => $card['cuisines']    ?? null,
+                        'price_range'        => $card['price_range'] ?? null,
+                        'duration_minutes'   => $card['duration_minutes'] ?? null,
+                    ];
+
+                    // Build also_at from nearby or context sections
+                    $alsoAt = [];
+                    if (!empty($card['nearby'])) {
+                        foreach ($card['nearby'] as $n) {
+                            $alsoAt[] = [
+                                'id'          => $n['entity_id']   ?? null,
+                                'title'       => $n['title']        ?? '',
+                                'slug'        => $n['slug']         ?? '',
+                                'slugid'      => $n['slugid']       ?? null,
+                                'entity_type' => $n['entity_type']  ?? $n['type'] ?? 'sight',
+                                'rating'      => $n['rating']       ?? null,
+                                'tier'        => $n['tier']         ?? 4,
+                                'image'       => $n['image']        ?? null,
+                            ];
+                        }
+                    }
+                    // Also add items from context sections (ENTITY_WITH_CONTEXT / HYBRID)
+                    if (!empty($card['sections'])) {
+                        foreach ($card['sections'] as $section) {
+                            foreach ($section['items'] ?? [] as $secItem) {
+                                $alsoAt[] = [
+                                    'id'          => $secItem['entity_id']   ?? null,
+                                    'title'       => $secItem['title']        ?? '',
+                                    'slug'        => $secItem['slug']         ?? '',
+                                    'slugid'      => $secItem['slugid']       ?? null,
+                                    'entity_type' => $secItem['entity_type']  ?? 'sight',
+                                    'rating'      => $secItem['rating']       ?? null,
+                                    'tier'        => $secItem['tier']         ?? 4,
+                                    'image'       => $secItem['image']        ?? null,
+                                ];
+                            }
+                        }
+                    }
+
+                    // Build the blade-compatible feed item
+                    $feedItem = [
+                        'type'          => $bladeType,
+                        'display_type'  => $displayType,
+                        'step_order'    => $stepOrder++,
+                        'data'          => $dataObject,
+                        'also_at'       => $alsoAt,
+                        // New card composition fields (for future enhanced rendering)
+                        'card_type'     => $card['card_type']  ?? 'PRIMARY_ENTITY',
+                        'layout'        => $cardLayout,
+                        'sections'      => $card['sections']   ?? [],
+                        'items'         => $card['items']      ?? [],
+                        'collection_type'  => $card['collection_type'] ?? null,
+                        'collection_title' => $card['collection_title'] ?? null,
+                        // Moment framing
+                        'moment_label'  => $card['moment_label_short'] ?? $card['moment_label_medium'] ?? null,
+                        'moment_type'   => $card['moment_type']   ?? null,
+                        'moment_family' => $card['moment_family'] ?? null,
+                        'moment_urgency'=> $card['moment_urgency'] ?? 0,
+                        'cta_style'     => $card['cta_style']    ?? 'explore',
+                        // Role & scoring
+                        'primary_role'  => $card['primary_role'] ?? null,
+                        'assembly_score'=> $card['assembly_score'] ?? 0,
+                        'slot_type'     => $card['slot_type']     ?? null,
+                        'slot_family'   => $card['slot_family']   ?? null,
+                        'slot_goal'     => $card['slot_goal']     ?? null,
+                        'planning_reason' => $card['planning_reason'] ?? null,
+                    ];
+
+                    $structuredFeed[] = $feedItem;
+
+                    // Also build flat list for backward-compatibility
                     $optimizedItinerary[] = (object)[
                         'SightId'        => $card['entity_id']    ?? null,
                         'Title'          => $card['title']        ?? '',
@@ -1084,7 +1185,7 @@ class ExploreController extends Controller
                         'CategoryTitle'  => $card['category']     ?? null,
                         'MicroSummary'   => $card['short_description'] ?? null,
                         'entity_type'    => $card['entity_type']  ?? $card['type'] ?? 'sight',
-                        'type'           => $card['type']         ?? 'sight',
+                        'type'           => $bladeType,
                         'moment_label'   => $card['moment_label_short'] ?? null,
                         'primary_role'   => $card['primary_role'] ?? null,
                     ];
@@ -1095,6 +1196,56 @@ class ExploreController extends Controller
                     'flatCount' => count($optimizedItinerary),
                     'session_id'=> $algoResult['session_id'] ?? null,
                 ]);
+
+                // ── Debug: Log card types & layouts for first 10 cards ──────────
+                $debugCards = [];
+                foreach (array_slice($feedData, 0, 10) as $i => $c) {
+                    $debugCards[] = [
+                        'pos'         => $i + 1,
+                        'entity_id'   => $c['entity_id'] ?? null,
+                        'title'       => $c['title'] ?? null,
+                        'card_type'   => $c['card_type'] ?? 'MISSING',
+                        'layout'      => $c['layout'] ?? 'MISSING',
+                        'tier'        => $c['tier'] ?? 'MISSING',
+                        'primary_role'=> $c['primary_role'] ?? 'MISSING',
+                    ];
+                }
+                Log::info('AlgoFeedEngine card composition debug', [
+                    'first_10_cards' => $debugCards,
+                ]);
+
+                // ── Debug: Write full structuredFeed JSON to file ───────────────
+                try {
+                    $debugDir = storage_path('framework/debug');
+                    if (!is_dir($debugDir)) {
+                        mkdir($debugDir, 0755, true);
+                    }
+                    $debugJson = [
+                        'location_id' => $locationID,
+                        'session_id'  => $algoResult['session_id'] ?? null,
+                        'feed_count'  => count($structuredFeed),
+                        'cards'       => array_map(function ($item) {
+                            return [
+                                'type'         => $item['type'] ?? null,
+                                'display_type' => $item['display_type'] ?? 'MISSING',
+                                'card_type'    => $item['card_type'] ?? 'MISSING',
+                                'layout'       => $item['layout'] ?? 'MISSING',
+                                'step_order'   => $item['step_order'] ?? null,
+                                'title'        => $item['data']['title'] ?? null,
+                                'entity_id'    => $item['data']['id'] ?? null,
+                                'tier'         => $item['data']['tier'] ?? null,
+                                'sections_count' => count($item['sections'] ?? []),
+                                'items_count'  => count($item['items'] ?? []),
+                            ];
+                        }, $structuredFeed),
+                    ];
+                    file_put_contents(
+                        $debugDir . '/feed_' . $locationID . '.json',
+                        json_encode($debugJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Could not write feed debug JSON: ' . $e->getMessage());
+                }
                 
             } catch (\Exception $e) {
                 Log::error('AlgoFeedEngine failed, falling back to ItineraryGenerator: ' . $e->getMessage());
@@ -1122,8 +1273,15 @@ class ExploreController extends Controller
         if ($request->boolean('dd_structured')) {
             dd([
                 'structuredFeed_count' => is_array($structuredFeed) ? count($structuredFeed) : null,
+                'cards_summary' => collect($structuredFeed)->map(fn($item) => [
+                    'type'         => $item['type'] ?? null,
+                    'display_type' => $item['display_type'] ?? 'MISSING',
+                    'card_type'    => $item['card_type'] ?? 'MISSING',
+                    'layout'       => $item['layout'] ?? 'MISSING',
+                    'tier'         => $item['data']['tier'] ?? null,
+                    'title'        => $item['data']['title'] ?? null,
+                ])->toArray(),
                 'structuredFeed_first' => is_array($structuredFeed) ? ($structuredFeed[0] ?? null) : null,
-                'structuredFeed_first_data' => is_array($structuredFeed) ? (($structuredFeed[0]['data'] ?? null)) : null,
             ]);
         }
 
