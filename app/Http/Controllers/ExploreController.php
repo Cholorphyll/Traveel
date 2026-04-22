@@ -1068,6 +1068,15 @@ class ExploreController extends Controller
                 $optimizedItinerary = [];
                 $stepOrder = 1;
 
+                // Pre-collect all primary entity IDs so also_at can exclude them
+                $primaryFeedEntityIds = [];
+                foreach ($feedData as $_c) {
+                    if (isset($_c['entity_id']) && ($_c['type'] ?? '') !== 'transit') {
+                        $primaryFeedEntityIds[] = (string)$_c['entity_id'];
+                    }
+                }
+                $primaryFeedEntityIds = array_flip($primaryFeedEntityIds); // flip for O(1) lookup
+
                 foreach ($feedData as $card) {
                     if (($card['type'] ?? '') === 'transit') {
                         $structuredFeed[] = $card;
@@ -1082,9 +1091,10 @@ class ExploreController extends Controller
                         default       => 'attraction',
                     };
 
-                    // Determine display_type from card layout
+                    // Determine display_type from card layout (restaurants always card_small)
                     $cardLayout   = $card['layout'] ?? 'LARGE';
-                    $displayType  = in_array($cardLayout, ['LARGE', 'LARGE_WITH_HORIZONTAL_SCROLL', 'MULTI_SECTION']) ? 'card_large' : 'card_small';
+                    $isRestaurant = ($card['entity_type'] ?? '') === 'restaurant';
+                    $displayType  = (!$isRestaurant && in_array($cardLayout, ['LARGE', 'LARGE_WITH_HORIZONTAL_SCROLL', 'MULTI_SECTION'])) ? 'card_large' : 'card_small';
 
                     // Build the data sub-object the blade expects
                     $dataObject = [
@@ -1105,10 +1115,17 @@ class ExploreController extends Controller
                         'duration_minutes'   => $card['duration_minutes'] ?? null,
                     ];
 
-                    // Build also_at from nearby or context sections
+                    // Build also_at from nearby, excluding any entity already shown as a primary card
                     $alsoAt = [];
                     if (!empty($card['nearby'])) {
+                        $alsoAtSeen = [];
                         foreach ($card['nearby'] as $n) {
+                            $nId = (string)($n['entity_id'] ?? '');
+                            // Skip if this entity is a primary feed card or already added
+                            if (!$nId || isset($primaryFeedEntityIds[$nId]) || isset($alsoAtSeen[$nId])) {
+                                continue;
+                            }
+                            $alsoAtSeen[$nId] = true;
                             $alsoAt[] = [
                                 'id'          => $n['entity_id']   ?? null,
                                 'title'       => $n['title']        ?? '',
@@ -1121,23 +1138,7 @@ class ExploreController extends Controller
                             ];
                         }
                     }
-                    // Also add items from context sections (ENTITY_WITH_CONTEXT / HYBRID)
-                    if (!empty($card['sections'])) {
-                        foreach ($card['sections'] as $section) {
-                            foreach ($section['items'] ?? [] as $secItem) {
-                                $alsoAt[] = [
-                                    'id'          => $secItem['entity_id']   ?? null,
-                                    'title'       => $secItem['title']        ?? '',
-                                    'slug'        => $secItem['slug']         ?? '',
-                                    'slugid'      => $secItem['slugid']       ?? null,
-                                    'entity_type' => $secItem['entity_type']  ?? 'sight',
-                                    'rating'      => $secItem['rating']       ?? null,
-                                    'tier'        => $secItem['tier']         ?? 4,
-                                    'image'       => $secItem['image']        ?? null,
-                                ];
-                            }
-                        }
-                    }
+                    // Sections are rendered directly in the blade — do NOT copy them into also_at
 
                     // Build the blade-compatible feed item
                     $feedItem = [
@@ -1419,6 +1420,19 @@ class ExploreController extends Controller
                         $alsoAtId = $alsoAtItem['id'] ?? ($alsoAtItem['SightId'] ?? null);
                         if (($entityType === 'sight' || $entityType === 'attraction') && !empty($alsoAtId) && (is_string($alsoAtId) || is_int($alsoAtId))) {
                             $sightIds[] = $alsoAtId;
+                        }
+                    }
+                }
+
+                // Context strip sections — collect sight IDs for image lookup
+                if (!empty($feedItem['sections'])) {
+                    foreach ($feedItem['sections'] as $section) {
+                        foreach ($section['items'] ?? [] as $ctxItem) {
+                            $ctxId   = $ctxItem['entity_id'] ?? null;
+                            $ctxType = $ctxItem['entity_type'] ?? 'sight';
+                            if ($ctxType === 'sight' && !empty($ctxId) && (is_string($ctxId) || is_int($ctxId))) {
+                                $sightIds[] = $ctxId;
+                            }
                         }
                     }
                 }

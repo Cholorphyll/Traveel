@@ -104,8 +104,30 @@ class FeedAssemblyEngine
         }
 
         // ── Backfill if sparse ─────────────────────────────────────────────
-        if (count($feed) < 6) {
+        if (count($feed) < self::MAX_FEED_CARDS) {
             $feed = $this->backfill($feed, $allCandidates, $recentMemory, $position, $ctx, $allCandidates);
+        }
+
+        // ── Interleave: first 3 slots = non-restaurants; then 1 restaurant per 4 positions ──
+        $nonRests = array_values(array_filter($feed, fn($c) => ($c['entity_type'] ?? '') !== 'restaurant'));
+        $rests     = array_values(array_filter($feed, fn($c) => ($c['entity_type'] ?? '') === 'restaurant'));
+
+        if (!empty($rests)) {
+            $interleaved = [];
+            $ni = 0; $ri = 0; $slot = 0;
+            while ($ni < count($nonRests) || $ri < count($rests)) {
+                // First 3 slots and every position that isn't the 4th in its group → non-restaurant
+                $useRest = ($slot >= 3) && ($slot % 4 === 3) && ($ri < count($rests)) && ($ni < count($nonRests));
+                if ($useRest) {
+                    $interleaved[] = $rests[$ri++];
+                } elseif ($ni < count($nonRests)) {
+                    $interleaved[] = $nonRests[$ni++];
+                } else {
+                    $interleaved[] = $rests[$ri++];
+                }
+                $slot++;
+            }
+            $feed = $interleaved;
         }
 
         // ── Update session state (authenticated users only) ─────────────

@@ -138,12 +138,13 @@ class CardCompositionEngine
 
     private function buildPrimaryEntity(array $card, array $ctx, int $position = 1): array
     {
-        $tier   = (int)($card['tier'] ?? 3);
-        $role   = $card['primary_role'] ?? '';
-        $isAnchor = in_array($role, ['CURRENT_ANCHOR', 'NEXT_ANCHOR', 'COMPOSITE_ANCHOR']);
+        $tier       = (int)($card['tier'] ?? 3);
+        $role       = $card['primary_role'] ?? '';
+        $entityType = $card['entity_type'] ?? 'sight';
+        $isAnchor   = in_array($role, ['CURRENT_ANCHOR', 'NEXT_ANCHOR', 'COMPOSITE_ANCHOR']);
 
-        // Layout: LARGE only for top-position tier-1 anchors; everything else MEDIUM
-        $useLarge = ($tier <= 1 && $isAnchor && $position <= 3);
+        // Layout: LARGE only for top-position tier-1 non-restaurant anchors; restaurants always MEDIUM
+        $useLarge = ($tier <= 1 && $isAnchor && $position <= 3 && $entityType !== 'restaurant');
         $layout = $useLarge ? self::LAYOUT_LARGE : self::LAYOUT_MEDIUM;
 
         return array_merge($card, [
@@ -335,6 +336,8 @@ class CardCompositionEngine
                     's.ReviewCount as review_count',
                     's.Latitude as lat',
                     's.Longitude as lng',
+                    's.Slug as slug',
+                    DB::raw("NULL as image"),
                     DB::raw("NULL as cuisines"),
                     DB::raw("NULL as price_range"),
                     DB::raw("0 as duration_minutes"),
@@ -360,6 +363,8 @@ class CardCompositionEngine
                     'r.ReviewCount as review_count',
                     'r.Latitude as lat',
                     'r.Longitude as lng',
+                    'r.Slug as slug',
+                    'r.Img1 as image',
                     'r.cuisines as cuisines',
                     'r.PriceRange as price_range',
                     DB::raw("45 as duration_minutes"),
@@ -439,6 +444,8 @@ class CardCompositionEngine
                 'review_count'=> $reviews,
                 'lat'         => $cLat,
                 'lng'         => $cLng,
+                'slug'        => is_array($c) ? ($c['slug'] ?? '') : ($c->slug ?? ''),
+                'image'       => is_array($c) ? ($c['image'] ?? null) : ($c->image ?? null),
                 'distance_m'  => (int)($distKm * 1000),
                 'cuisines'    => is_array($c) ? ($c['cuisines'] ?? null) : ($c->cuisines ?? null),
                 'price_range' => is_array($c) ? ($c['price_range'] ?? null) : ($c->price_range ?? null),

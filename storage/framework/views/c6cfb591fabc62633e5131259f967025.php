@@ -2207,14 +2207,23 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                                                 <?php
                                                     $ctxEntityType = $ctxItem['entity_type'] ?? 'sight';
                                                     $ctxBladeType  = $ctxEntityType === 'sight' ? 'attraction' : $ctxEntityType;
+                                                    $ctxSlugid = $ctxItem['slugid'] ?? ($feedItem['data']->slugid ?? '');
                                                     $ctxHref = $ctxBladeType === 'experience'
-                                                        ? route('experince', [($ctxItem['slugid'] ?? '').'-'.str_replace('exp_', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? '')])
+                                                        ? route('experince', [$ctxSlugid.'-'.str_replace('exp_', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? '')])
                                                         : ($ctxBladeType === 'restaurant'
-                                                            ? url('rd-'.($ctxItem['slugid'] ?? '').'-'.preg_replace('/[^0-9]/', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? ''))
-                                                            : url('at-'.($ctxItem['slugid'] ?? '').'-'.($ctxItem['entity_id'] ?? '').'-'.strtolower($ctxItem['slug'] ?? '')));
-                                                    $ctxImg = $ctxItem['image'] ?? asset('frontend/hotel-detail/images/Hotel lobby-image.png');
-                                                    if (!empty($ctxImg) && !str_contains($ctxImg, 'http') && !str_contains($ctxImg, 'frontend')) {
-                                                        $ctxImg = "https://image-resize-5q14d76mz-cholorphylls-projects.vercel.app/api/resize?url={$ctxImg}&width=320&height=300";
+                                                            ? url('rd-'.$ctxSlugid.'-'.preg_replace('/[^0-9]/', '', $ctxItem['entity_id'] ?? '').'-'.($ctxItem['slug'] ?? ''))
+                                                            : url('at-'.$ctxSlugid.'-'.($ctxItem['entity_id'] ?? '').'-'.strtolower($ctxItem['slug'] ?? '')));
+                                                    $ctxId  = $ctxItem['entity_id'] ?? null;
+                                                    $ctxImg = asset('frontend/hotel-detail/images/Hotel lobby-image.png');
+                                                    if ($ctxEntityType === 'sight' && $ctxId && isset($sightImageLookup[$ctxId])) {
+                                                        foreach ($sightImageLookup[$ctxId] as $ctxImgPath) {
+                                                            if (!str_contains($ctxImgPath, 'vid')) {
+                                                                $ctxImg = "https://image-resize-5q14d76mz-cholorphylls-projects.vercel.app/api/resize?url=https://s3-us-west-2.amazonaws.com/s3-travell/Sight-images/{$ctxImgPath}&width=320&height=300";
+                                                                break;
+                                                            }
+                                                        }
+                                                    } elseif (!empty($ctxItem['image'])) {
+                                                        $ctxImg = "https://image-resize-5q14d76mz-cholorphylls-projects.vercel.app/api/resize?url={$ctxItem['image']}&width=320&height=300";
                                                     }
                                                 ?>
                                                 <div class="tr-store">
@@ -2249,7 +2258,7 @@ echo json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UN
                             <?php endif; ?>
 
                             
-                            <?php if(!empty($feedItem['also_at'])): ?>
+                            <?php if(!empty($feedItem['also_at']) && empty($feedItem['sections'])): ?>
                                 <div class="also__AtSection">
                                     <div class="divider">
                                         <span>Also at</span>
