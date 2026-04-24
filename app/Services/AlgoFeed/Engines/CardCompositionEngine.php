@@ -143,8 +143,8 @@ class CardCompositionEngine
         $entityType = $card['entity_type'] ?? 'sight';
         $isAnchor   = in_array($role, ['CURRENT_ANCHOR', 'NEXT_ANCHOR', 'COMPOSITE_ANCHOR']);
 
-        // Layout: LARGE only for top-position tier-1 non-restaurant anchors; restaurants always MEDIUM
-        $useLarge = ($tier <= 1 && $isAnchor && $position <= 3 && $entityType !== 'restaurant');
+        // Layout: tier-1 entities use LARGE (except restaurants which are always MEDIUM)
+        $useLarge = ($tier <= 1 && $entityType !== 'restaurant');
         $layout = $useLarge ? self::LAYOUT_LARGE : self::LAYOUT_MEDIUM;
 
         return array_merge($card, [
