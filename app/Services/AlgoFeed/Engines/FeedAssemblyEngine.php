@@ -130,6 +130,21 @@ class FeedAssemblyEngine
             $feed = $interleaved;
         }
 
+        // ── Ensure position 1 highlights a must-see (tier-1) non-restaurant if available ──
+        if (!empty($feed) && (int)($feed[0]['tier'] ?? 99) > 1) {
+            foreach ($feed as $idx => $card) {
+                if ($idx === 0) {
+                    continue;
+                }
+                $tier = (int)($card['tier'] ?? 99);
+                $type = $card['entity_type'] ?? '';
+                if ($tier <= 1 && $type !== 'restaurant') {
+                    [$feed[0], $feed[$idx]] = [$feed[$idx], $feed[0]];
+                    break;
+                }
+            }
+        }
+
         // ── Update session state (authenticated users only) ─────────────
         if ($userId) {
             $this->updateSessionState($sessionId, $userId, $tripId, $feed, $recentCards, $sessionState);
