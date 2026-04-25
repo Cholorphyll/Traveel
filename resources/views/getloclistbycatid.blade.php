@@ -12,7 +12,9 @@ $j = 0;
 
 
             <!-- Now display all non-must-see items in tr-common-listing div -->
+            @if(($type ?? '') !== 'loadmore')
             <div class="tr-commo n-listing">
+            @endif
                 @foreach($searchresults as $item)
                 @php
                     // Determine item type
@@ -496,7 +498,11 @@ $j = 0;
                     </div>
                 @endif
                 @endforeach
+            @if(($type ?? '') !== 'loadmore')
             </div>
             @endif
+            @endif
+              @if(($type ?? '') !== 'loadmore')
               <input type="hidden" id="shown-attraction-ids" value="{{ implode(',', $searchresults->pluck('SightId')->toArray()) }}">
             </div>
+              @endif

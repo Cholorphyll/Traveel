@@ -12,7 +12,9 @@ $j = 0;
 
 
             <!-- Now display all non-must-see items in tr-common-listing div -->
+            <?php if(($type ?? '') !== 'loadmore'): ?>
             <div class="tr-commo n-listing">
+            <?php endif; ?>
                 <?php $__currentLoopData = $searchresults; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $item): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
                 <?php
                     // Determine item type
@@ -496,8 +498,12 @@ $j = 0;
                     </div>
                 <?php endif; ?>
                 <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
+            <?php if(($type ?? '') !== 'loadmore'): ?>
             </div>
             <?php endif; ?>
+            <?php endif; ?>
+              <?php if(($type ?? '') !== 'loadmore'): ?>
               <input type="hidden" id="shown-attraction-ids" value="<?php echo e(implode(',', $searchresults->pluck('SightId')->toArray())); ?>">
             </div>
+              <?php endif; ?>
 <?php /**PATH C:\wamp64\www\tavelll\resources\views/getloclistbycatid.blade.php ENDPATH**/ ?>

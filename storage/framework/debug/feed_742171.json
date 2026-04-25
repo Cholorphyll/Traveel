@@ -1,29 +1,29 @@
 {
     "location_id": 742171,
-    "session_id": "feed_69e8f8c1cf37e4.22705792",
+    "session_id": "feed_69ec7aabe841d5.49572301",
     "feed_count": 18,
     "cards": [
-        {
-            "type": "attraction",
-            "display_type": "card_small",
-            "card_type": "PRIMARY_ENTITY",
-            "layout": "MEDIUM",
-            "step_order": 1,
-            "title": "Chandigarh Rose Garden",
-            "entity_id": 783840,
-            "tier": 2,
-            "sections_count": 0,
-            "items_count": 0
-        },
         {
             "type": "attraction",
             "display_type": "card_large",
             "card_type": "PRIMARY_ENTITY",
             "layout": "LARGE",
-            "step_order": 2,
+            "step_order": 1,
             "title": "The Rock Garden of Chandigarh",
             "entity_id": 783792,
             "tier": 1,
+            "sections_count": 0,
+            "items_count": 0
+        },
+        {
+            "type": "attraction",
+            "display_type": "card_small",
+            "card_type": "PRIMARY_ENTITY",
+            "layout": "MEDIUM",
+            "step_order": 2,
+            "title": "Chandigarh Rose Garden",
+            "entity_id": 783840,
+            "tier": 2,
             "sections_count": 0,
             "items_count": 0
         },
@@ -41,9 +41,9 @@
         },
         {
             "type": "attraction",
-            "display_type": "card_small",
+            "display_type": "card_large",
             "card_type": "PRIMARY_ENTITY",
-            "layout": "MEDIUM",
+            "layout": "LARGE",
             "step_order": 4,
             "title": "Sukhna Lake",
             "entity_id": 1412116,

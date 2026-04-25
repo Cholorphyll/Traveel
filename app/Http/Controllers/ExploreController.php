@@ -1068,14 +1068,20 @@ class ExploreController extends Controller
                 $optimizedItinerary = [];
                 $stepOrder = 1;
 
-                // Pre-collect all primary entity IDs so also_at can exclude them
-                $primaryFeedEntityIds = [];
+                // Pre-collect all primary entities so also_at can exclude them
+                // Use a composite key to avoid collisions across entity types (e.g., sight 25 vs restaurant 25)
+                $primaryFeedEntityKeys = [];
                 foreach ($feedData as $_c) {
                     if (isset($_c['entity_id']) && ($_c['type'] ?? '') !== 'transit') {
-                        $primaryFeedEntityIds[] = (string)$_c['entity_id'];
+                        $t = (string)($_c['entity_type'] ?? $_c['type'] ?? 'sight');
+                        $id = (string)$_c['entity_id'];
+                        $primaryFeedEntityKeys[] = $t . ':' . $id;
                     }
                 }
-                $primaryFeedEntityIds = array_flip($primaryFeedEntityIds); // flip for O(1) lookup
+                $primaryFeedEntityKeys = array_flip($primaryFeedEntityKeys); // flip for O(1) lookup
+
+                // Track also_at items already used anywhere in the feed to avoid repetition across cards
+                $globalAlsoAtKeys = [];
 
                 foreach ($feedData as $card) {
                     if (($card['type'] ?? '') === 'transit') {
@@ -1120,12 +1126,20 @@ class ExploreController extends Controller
                     if (!empty($card['nearby'])) {
                         $alsoAtSeen = [];
                         foreach ($card['nearby'] as $n) {
+                            $nType = (string)($n['entity_type'] ?? $n['type'] ?? 'sight');
                             $nId = (string)($n['entity_id'] ?? '');
+                            $nKey = $nType . ':' . $nId;
                             // Skip if this entity is a primary feed card or already added
-                            if (!$nId || isset($primaryFeedEntityIds[$nId]) || isset($alsoAtSeen[$nId])) {
+                            if (
+                                !$nId ||
+                                isset($primaryFeedEntityKeys[$nKey]) ||
+                                isset($alsoAtSeen[$nKey]) ||
+                                isset($globalAlsoAtKeys[$nKey])
+                            ) {
                                 continue;
                             }
-                            $alsoAtSeen[$nId] = true;
+                            $alsoAtSeen[$nKey] = true;
+                            $globalAlsoAtKeys[$nKey] = true;
                             $alsoAt[] = [
                                 'id'          => $n['entity_id']   ?? null,
                                 'title'       => $n['title']        ?? '',
@@ -1810,6 +1824,17 @@ class ExploreController extends Controller
         $slug = $request->input('slug');
         $perPage = 30;
         $skip = ($page - 1) * $perPage;
+
+        if ((int)$page <= 1) {
+            return response()->json([
+                'html' => '',
+                'hasMore' => true,
+                'newIds' => [],
+                'totalCount' => null,
+                'page' => (int)$page,
+                'mapData' => json_encode([]),
+            ]);
+        }
 
         // Get already shown IDs from request
         $shownIds = [];

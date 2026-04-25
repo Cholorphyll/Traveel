@@ -458,7 +458,7 @@ function updateMapWithFilteredData(getrest) {
 
 
 // inf scroll
-let page = 1; // Start with page 2 since page 1 is loaded initially
+let page = 2; // page 1 is already loaded initially
 let loading = false;
 var locid = $('#locid').text();
 var slug = $('#slug').text();
@@ -550,9 +550,6 @@ function checkScroll() {
     }
 }
 
-
-
-window.addEventListener('scroll', checkScroll);
 
 const _loadMoreBtn = document.querySelector('.tr-load-more');
 if (_loadMoreBtn) {
